@@ -1,0 +1,5 @@
+{
+  "name": "Forex Analysis Bot",
+  "description": "A professional Forex analysis tool featuring MA Crossover and RSI strategies, real-time visualization, backtesting engine, and AI-powered market insights.",
+  "requestFramePermissions": []
+}
