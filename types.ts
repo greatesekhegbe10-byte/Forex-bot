@@ -1,3 +1,4 @@
+
 export enum StrategyType {
   MA_CROSSOVER = 'MA_CROSSOVER',
   RSI = 'RSI',
@@ -17,7 +18,7 @@ export enum SignalType {
 }
 
 export interface Candle {
-  time: string; // ISO string or formatted time
+  time: string; // ISO string
   open: number;
   high: number;
   low: number;
@@ -59,4 +60,43 @@ export interface GeminiAnalysisResult {
   sentiment: string;
   keyLevels: string[];
   actionableAdvice: string;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export interface AuthState {
+  isAuthenticated: boolean;
+  user: User | null;
+}
+
+export interface MetaApiConfig {
+  accountId: string;
+  accessToken: string;
+  region: string; // e.g., 'new-york', 'london'
+}
+
+export interface AppSettings {
+  appName: string;
+  domainUrl: string;
+}
+
+export interface TradeOrder {
+  symbol: string;
+  actionType: 'ORDER_TYPE_BUY' | 'ORDER_TYPE_SELL';
+  volume: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  comment?: string;
+}
+
+export interface ParsedSignal {
+  symbol?: string;
+  type?: 'BUY' | 'SELL';
+  entry?: number;
+  sl?: number;
+  tp?: number;
 }
