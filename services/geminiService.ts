@@ -2,14 +2,17 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { MarketAnalysis, GeminiAnalysisResult } from '../types';
 import { logger } from './logger';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<GeminiAnalysisResult> => {
-  if (!process.env.API_KEY) {
-    const msg = "Gemini API Key is missing from environment configuration.";
+  // Lazily access the key to prevent initialization errors during module load
+  const apiKey = process.env.API_KEY;
+
+  if (!apiKey) {
+    const msg = "Gemini API Key is missing. Please check your .env file or build configuration.";
     logger.error(msg);
-    throw new Error(msg);
+    throw new Error("AI Service Unavailable: API Key missing");
   }
+
+  const ai = new GoogleGenAI({ apiKey });
 
   logger.info(`Requesting AI insight for ${analysis.pair}`);
 
@@ -65,7 +68,14 @@ export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<G
     return result;
 
   } catch (error: any) {
-    logger.error("Gemini API Failed", error);
-    throw error;
+    // Handle specific API errors gracefully
+    const errorMessage = error.message || "Unknown AI Error";
+    logger.error("Gemini API Failed", errorMessage);
+    
+    if (errorMessage.includes('401') || errorMessage.includes('key')) {
+        throw new Error("Invalid API Key. Please check configuration.");
+    }
+    
+    throw new Error("AI Analysis failed. Please try again later.");
   }
 };

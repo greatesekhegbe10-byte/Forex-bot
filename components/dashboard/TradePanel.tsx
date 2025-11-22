@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Zap, Clipboard, PlayCircle, AlertOctagon, Calculator, CheckCircle2, Bell, Trash2, Settings2 } from 'lucide-react';
 import { MetaApiConfig, TradeOrder, AutoTradeConfig } from '../../types';
@@ -170,10 +169,10 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden flex flex-col h-full">
       {/* Header Tabs */}
-      <div className="flex border-b border-slate-700">
+      <div className="flex border-b border-slate-700 overflow-x-auto">
         <button 
           onClick={() => setTab('manual')}
-          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
+          className={`flex-1 min-w-[60px] py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
             tab === 'manual' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
           }`}
         >
@@ -181,7 +180,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         </button>
         <button 
           onClick={() => setTab('parser')}
-          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
+          className={`flex-1 min-w-[60px] py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
             tab === 'parser' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
           }`}
         >
@@ -189,7 +188,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         </button>
         <button 
           onClick={() => setTab('auto')}
-          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
+          className={`flex-1 min-w-[60px] py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
             tab === 'auto' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
           }`}
         >
@@ -197,7 +196,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         </button>
         <button 
           onClick={() => setTab('alerts')}
-          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
+          className={`flex-1 min-w-[60px] py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
             tab === 'alerts' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
           }`}
         >
@@ -205,7 +204,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         </button>
       </div>
 
-      <div className="p-6 flex-1 flex flex-col">
+      <div className="p-4 md:p-6 flex-1 flex flex-col">
         
         {/* MANUAL TRADE TAB */}
         {tab === 'manual' && (
@@ -215,7 +214,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
               <span className="text-white font-bold">{activePair}</span>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
                <div>
                  <label className="text-xs text-slate-400 font-bold uppercase mb-1 block">Lot Size</label>
                  <input 
@@ -223,20 +222,20 @@ export const TradePanel: React.FC<TradePanelProps> = ({
                    step="0.01"
                    value={lotSize}
                    onChange={(e) => setLotSize(parseFloat(e.target.value))}
-                   className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-right font-mono"
+                   className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-right font-mono text-sm"
                  />
                </div>
-               <div className="flex items-end pb-2">
+               <div className="flex items-end pb-1">
                   <button 
-                    onClick={() => setTab('auto')} // Redirect to calculator
+                    onClick={() => setTab('auto')} // Redirect to calculator for now
                     className="text-xs text-blue-400 hover:text-blue-300 underline flex items-center gap-1"
                   >
-                    <Calculator size={12} /> Calculate
+                    <Calculator size={12} /> Calculate Risk
                   </button>
                </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
                <div>
                  <label className="text-xs text-slate-400 font-bold uppercase mb-1 block">Stop Loss</label>
                  <input 
@@ -244,7 +243,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
                    step="0.0001"
                    value={stopLoss}
                    onChange={(e) => setStopLoss(e.target.value)}
-                   className="w-full bg-slate-900 border border-red-900/50 rounded p-2 text-red-400 text-right font-mono"
+                   className="w-full bg-slate-900 border border-red-900/50 rounded p-2 text-red-400 text-right font-mono text-sm"
                  />
                </div>
                <div>
@@ -254,25 +253,25 @@ export const TradePanel: React.FC<TradePanelProps> = ({
                    step="0.0001"
                    value={takeProfit}
                    onChange={(e) => setTakeProfit(e.target.value)}
-                   className="w-full bg-slate-900 border border-green-900/50 rounded p-2 text-green-400 text-right font-mono"
+                   className="w-full bg-slate-900 border border-green-900/50 rounded p-2 text-green-400 text-right font-mono text-sm"
                  />
                </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 pt-4">
+            <div className="grid grid-cols-2 gap-3 pt-2">
               <button
                 onClick={() => handleExecute('SELL')}
                 disabled={isExecuting}
-                className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-3 rounded shadow-lg shadow-red-600/20 transition-all flex justify-center items-center gap-2"
+                className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-3 rounded shadow-lg shadow-red-600/20 transition-all flex justify-center items-center gap-2 text-sm md:text-base"
               >
-                 {isExecuting ? 'Processing...' : 'SELL'}
+                 {isExecuting ? '...' : 'SELL'}
               </button>
               <button
                 onClick={() => handleExecute('BUY')}
                 disabled={isExecuting}
-                className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3 rounded shadow-lg shadow-green-600/20 transition-all flex justify-center items-center gap-2"
+                className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3 rounded shadow-lg shadow-green-600/20 transition-all flex justify-center items-center gap-2 text-sm md:text-base"
               >
-                 {isExecuting ? 'Processing...' : 'BUY'}
+                 {isExecuting ? '...' : 'BUY'}
               </button>
             </div>
           </div>
@@ -282,11 +281,11 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         {tab === 'parser' && (
           <div className="space-y-4">
             <p className="text-xs text-slate-400">
-              Paste a signal text. The bot will extract entry, SL, and TP levels.
+              Paste a signal text below to extract entry points.
             </p>
             <textarea
               className="w-full h-32 bg-slate-900 border border-slate-700 rounded p-3 text-sm text-slate-300 font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              placeholder="e.g., BUY EURUSD @ 1.0500 SL 1.0450 TP 1.0600"
+              placeholder="BUY EURUSD @ 1.0500 SL 1.0450"
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
@@ -345,28 +344,24 @@ export const TradePanel: React.FC<TradePanelProps> = ({
 
             {/* Auto Trade Toggle */}
             <div className="bg-slate-900/50 p-4 rounded border border-slate-700 flex items-center justify-between">
-               <div>
+               <div className="pr-2">
                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
                    <Zap size={16} className={isAutoTrading ? 'text-yellow-400 fill-yellow-400' : 'text-slate-500'} />
                    Auto-Trading
                  </h4>
-                 <p className="text-xs text-slate-500 mt-1">
-                   {isAutoTrading ? 'Bot executing >70% confidence signals.' : 'Bot execution paused.'}
+                 <p className="text-[10px] md:text-xs text-slate-500 mt-1">
+                   {isAutoTrading ? 'Scanning >70% confidence' : 'Bot Paused'}
                  </p>
                </div>
                <button
                  onClick={() => {
                     onAutoTradeToggle(!isAutoTrading);
-                    notify('info', isAutoTrading ? 'Auto-Trading Disabled' : 'Auto-Trading Enabled', isAutoTrading ? 'Bot will no longer execute trades.' : 'Bot is now scanning for high-confidence signals.');
+                    notify('info', isAutoTrading ? 'Auto-Trading Disabled' : 'Auto-Trading Enabled', isAutoTrading ? 'Bot execution paused.' : 'Bot active.');
                  }}
-                 className={`w-12 h-6 rounded-full p-1 transition-colors ${isAutoTrading ? 'bg-green-500' : 'bg-slate-700'}`}
+                 className={`shrink-0 w-12 h-6 rounded-full p-1 transition-colors ${isAutoTrading ? 'bg-green-500' : 'bg-slate-700'}`}
                >
                  <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${isAutoTrading ? 'translate-x-6' : 'translate-x-0'}`} />
                </button>
-            </div>
-
-            <div className="bg-slate-900/20 p-3 rounded border border-slate-800 text-[10px] text-slate-500">
-               Disclaimer: Auto-trading carries significant risk. Ensure your Broker API connection is stable and SL/TP settings match your risk appetite.
             </div>
           </div>
         )}
@@ -391,31 +386,23 @@ export const TradePanel: React.FC<TradePanelProps> = ({
                     />
                     <button 
                       onClick={handleSetAlert}
-                      className="px-4 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold"
+                      className="px-3 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold text-xs"
                     >
                       Set
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Current: {currentPrice.toFixed(activePair.includes('JPY') ? 2 : 4)}. 
-                    Alert will trigger when price crosses {parseFloat(alertTarget) || 'target'}.
-                  </p>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <h4 className="text-xs text-slate-400 font-bold uppercase">Active Alerts ({activePair})</h4>
-              {priceAlerts.filter(a => a.pair === activePair).length === 0 && (
-                <p className="text-xs text-slate-600 italic text-center py-4">No alerts set for this pair.</p>
-              )}
-              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+            <div className="space-y-2 flex-1 overflow-y-auto">
+              <h4 className="text-xs text-slate-400 font-bold uppercase">Active Alerts</h4>
+              <div className="space-y-2">
                 {priceAlerts.filter(a => a.pair === activePair).map(alert => (
                   <div key={alert.id} className="flex items-center justify-between bg-slate-800 p-2 rounded border border-slate-700">
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${alert.condition === 'ABOVE' ? 'bg-green-500' : 'bg-red-500'}`} />
-                      <span className="text-sm font-mono">{alert.target}</span>
-                      <span className="text-[10px] text-slate-500 uppercase bg-slate-900 px-1 rounded">{alert.condition}</span>
+                      <span className="text-xs font-mono">{alert.target}</span>
                     </div>
                     <button 
                       onClick={() => deleteAlert(alert.id)}
