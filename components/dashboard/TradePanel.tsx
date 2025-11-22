@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Zap, Clipboard, PlayCircle, AlertOctagon, Calculator, CheckCircle2 } from 'lucide-react';
-import { MetaApiConfig, TradeOrder } from '../../types';
+import { Zap, Clipboard, PlayCircle, AlertOctagon, Calculator, CheckCircle2, Bell, Trash2, Settings2 } from 'lucide-react';
+import { MetaApiConfig, TradeOrder, AutoTradeConfig } from '../../types';
 import { parseSignalText, executeMetaApiTrade } from '../../services/forexService';
 import { ToastType } from '../ui/Toast';
 
@@ -12,6 +12,15 @@ interface TradePanelProps {
   onAutoTradeToggle: (enabled: boolean) => void;
   isAutoTrading: boolean;
   notify: (type: ToastType, title: string, message: string) => void;
+  autoTradeConfig: AutoTradeConfig;
+  onUpdateAutoConfig: (config: AutoTradeConfig) => void;
+}
+
+interface PriceAlert {
+  id: string;
+  pair: string;
+  target: number;
+  condition: 'ABOVE' | 'BELOW';
 }
 
 export const TradePanel: React.FC<TradePanelProps> = ({ 
@@ -20,9 +29,11 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   metaApiConfig,
   onAutoTradeToggle,
   isAutoTrading,
-  notify
+  notify,
+  autoTradeConfig,
+  onUpdateAutoConfig
 }) => {
-  const [tab, setTab] = useState<'manual' | 'parser' | 'auto'>('manual');
+  const [tab, setTab] = useState<'manual' | 'parser' | 'auto' | 'alerts'>('manual');
   
   // Trade Form State
   const [lotSize, setLotSize] = useState<number>(0.01);
@@ -38,13 +49,44 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   const [riskPercent, setRiskPercent] = useState(1);
   const [slPips, setSlPips] = useState(50);
 
+  // Alerts State
+  const [priceAlerts, setPriceAlerts] = useState<PriceAlert[]>([]);
+  const [alertTarget, setAlertTarget] = useState<string>('');
+
+  // Update SL/TP defaults when pair/price changes
   useEffect(() => {
     if (activePair && currentPrice) {
       const pip = activePair.includes('JPY') ? 0.01 : 0.0001;
       setStopLoss((currentPrice - 50 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
       setTakeProfit((currentPrice + 100 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
+      setAlertTarget(currentPrice.toFixed(activePair.includes('JPY') ? 2 : 4));
     }
   }, [activePair, currentPrice]);
+
+  // Monitor Alerts
+  useEffect(() => {
+    if (!currentPrice) return;
+
+    setPriceAlerts(prev => {
+      const nextAlerts = prev.filter(alert => {
+        // Only check alerts for the active pair currently being streamed
+        if (alert.pair !== activePair) return true;
+
+        const hit = 
+          (alert.condition === 'ABOVE' && currentPrice >= alert.target) ||
+          (alert.condition === 'BELOW' && currentPrice <= alert.target);
+
+        if (hit) {
+          notify('info', 'Price Alert Triggered', `${alert.pair} hit ${alert.target}`);
+          // Play sound effect optionally?
+          return false; // Remove from list
+        }
+        return true; // Keep
+      });
+
+      return nextAlerts.length !== prev.length ? nextAlerts : prev;
+    });
+  }, [currentPrice, activePair, notify]);
 
   const handleExecute = async (type: 'BUY' | 'SELL') => {
     if (!metaApiConfig) {
@@ -94,13 +136,44 @@ export const TradePanel: React.FC<TradePanelProps> = ({
     notify('info', 'Risk Calculated', `Suggested Lot Size: ${estimatedLot.toFixed(2)}`);
   };
 
+  const handleSetAlert = () => {
+    const target = parseFloat(alertTarget);
+    if (!target || isNaN(target)) {
+      notify('warning', 'Invalid Price', 'Please enter a valid target price.');
+      return;
+    }
+
+    const condition = target > currentPrice ? 'ABOVE' : 'BELOW';
+    const newAlert: PriceAlert = {
+      id: Math.random().toString(36).substr(2, 9),
+      pair: activePair,
+      target,
+      condition
+    };
+
+    setPriceAlerts(prev => [...prev, newAlert]);
+    notify('success', 'Alert Set', `Notify when ${activePair} goes ${condition} ${target}`);
+  };
+
+  const deleteAlert = (id: string) => {
+    setPriceAlerts(prev => prev.filter(a => a.id !== id));
+  };
+
+  // Helper to update auto config fields
+  const updateAutoConfig = (field: keyof AutoTradeConfig, value: number) => {
+    onUpdateAutoConfig({
+      ...autoTradeConfig,
+      [field]: value
+    });
+  };
+
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden flex flex-col h-full">
       {/* Header Tabs */}
       <div className="flex border-b border-slate-700">
         <button 
           onClick={() => setTab('manual')}
-          className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${
+          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
             tab === 'manual' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
           }`}
         >
@@ -108,19 +181,27 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         </button>
         <button 
           onClick={() => setTab('parser')}
-          className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${
+          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
             tab === 'parser' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
           }`}
         >
-          Signal Parser
+          Parser
         </button>
         <button 
           onClick={() => setTab('auto')}
-          className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${
+          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
             tab === 'auto' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
           }`}
         >
-          Auto-Bot
+          Auto
+        </button>
+        <button 
+          onClick={() => setTab('alerts')}
+          className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${
+            tab === 'alerts' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-750'
+          }`}
+        >
+          Alerts
         </button>
       </div>
 
@@ -222,35 +303,44 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         {/* AUTO BOT TAB */}
         {tab === 'auto' && (
           <div className="space-y-6">
-            {/* Calculator */}
+            
+            {/* Bot Configuration */}
             <div className="bg-slate-900/50 p-4 rounded border border-slate-700">
-              <h4 className="text-xs text-slate-400 font-bold uppercase mb-3 flex items-center gap-2">
-                <Calculator size={14} /> Position Calculator
-              </h4>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 uppercase">Balance</label>
-                  <input type="number" value={accountBalance} onChange={e => setAccountBalance(parseFloat(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded p-1 text-sm" />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 uppercase">Risk %</label>
-                  <input type="number" value={riskPercent} onChange={e => setRiskPercent(parseFloat(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded p-1 text-sm" />
-                </div>
-              </div>
-              <div className="mb-3">
-                  <label className="text-[10px] text-slate-500 uppercase">Stop Loss (Pips)</label>
-                  <input type="number" value={slPips} onChange={e => setSlPips(parseFloat(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded p-1 text-sm" />
-              </div>
-              <button 
-                onClick={calculateRisk}
-                className="w-full py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold text-white mb-3"
-              >
-                Calculate Lots
-              </button>
-              <div className="flex justify-between items-center border-t border-slate-700 pt-2">
-                <span className="text-xs text-slate-400">Result:</span>
-                <span className="text-lg font-bold text-white">{lotSize} Lots</span>
-              </div>
+               <h4 className="text-xs text-slate-400 font-bold uppercase mb-3 flex items-center gap-2">
+                 <Settings2 size={14} /> Bot Risk Settings
+               </h4>
+               <div className="space-y-3">
+                 <div>
+                    <label className="text-[10px] text-slate-500 uppercase">Fixed Lot Size</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={autoTradeConfig.lotSize} 
+                      onChange={e => updateAutoConfig('lotSize', parseFloat(e.target.value))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm"
+                    />
+                 </div>
+                 <div className="grid grid-cols-2 gap-2">
+                   <div>
+                      <label className="text-[10px] text-slate-500 uppercase">SL (Pips)</label>
+                      <input 
+                        type="number" 
+                        value={autoTradeConfig.stopLossPips} 
+                        onChange={e => updateAutoConfig('stopLossPips', parseFloat(e.target.value))}
+                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm"
+                      />
+                   </div>
+                   <div>
+                      <label className="text-[10px] text-slate-500 uppercase">TP (Pips)</label>
+                      <input 
+                        type="number" 
+                        value={autoTradeConfig.takeProfitPips} 
+                        onChange={e => updateAutoConfig('takeProfitPips', parseFloat(e.target.value))}
+                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm"
+                      />
+                   </div>
+                 </div>
+               </div>
             </div>
 
             {/* Auto Trade Toggle */}
@@ -261,18 +351,81 @@ export const TradePanel: React.FC<TradePanelProps> = ({
                    Auto-Trading
                  </h4>
                  <p className="text-xs text-slate-500 mt-1">
-                   {isAutoTrading ? 'Bot will execute signals automatically.' : 'Signals require manual confirmation.'}
+                   {isAutoTrading ? 'Bot executing >70% confidence signals.' : 'Bot execution paused.'}
                  </p>
                </div>
                <button
                  onClick={() => {
                     onAutoTradeToggle(!isAutoTrading);
-                    notify('info', isAutoTrading ? 'Auto-Trading Disabled' : 'Auto-Trading Enabled', isAutoTrading ? 'Bot will no longer execute trades.' : 'Bot is now active.');
+                    notify('info', isAutoTrading ? 'Auto-Trading Disabled' : 'Auto-Trading Enabled', isAutoTrading ? 'Bot will no longer execute trades.' : 'Bot is now scanning for high-confidence signals.');
                  }}
                  className={`w-12 h-6 rounded-full p-1 transition-colors ${isAutoTrading ? 'bg-green-500' : 'bg-slate-700'}`}
                >
                  <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${isAutoTrading ? 'translate-x-6' : 'translate-x-0'}`} />
                </button>
+            </div>
+
+            <div className="bg-slate-900/20 p-3 rounded border border-slate-800 text-[10px] text-slate-500">
+               Disclaimer: Auto-trading carries significant risk. Ensure your Broker API connection is stable and SL/TP settings match your risk appetite.
+            </div>
+          </div>
+        )}
+
+        {/* ALERTS TAB */}
+        {tab === 'alerts' && (
+          <div className="space-y-6">
+            <div className="bg-slate-900/50 p-4 rounded border border-slate-700">
+              <h4 className="text-xs text-slate-400 font-bold uppercase mb-3 flex items-center gap-2">
+                <Bell size={14} /> Set Price Alert
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 uppercase">Target Price</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="number" 
+                      step="0.0001"
+                      value={alertTarget} 
+                      onChange={e => setAlertTarget(e.target.value)} 
+                      className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm font-mono" 
+                    />
+                    <button 
+                      onClick={handleSetAlert}
+                      className="px-4 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold"
+                    >
+                      Set
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Current: {currentPrice.toFixed(activePair.includes('JPY') ? 2 : 4)}. 
+                    Alert will trigger when price crosses {parseFloat(alertTarget) || 'target'}.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="text-xs text-slate-400 font-bold uppercase">Active Alerts ({activePair})</h4>
+              {priceAlerts.filter(a => a.pair === activePair).length === 0 && (
+                <p className="text-xs text-slate-600 italic text-center py-4">No alerts set for this pair.</p>
+              )}
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                {priceAlerts.filter(a => a.pair === activePair).map(alert => (
+                  <div key={alert.id} className="flex items-center justify-between bg-slate-800 p-2 rounded border border-slate-700">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${alert.condition === 'ABOVE' ? 'bg-green-500' : 'bg-red-500'}`} />
+                      <span className="text-sm font-mono">{alert.target}</span>
+                      <span className="text-[10px] text-slate-500 uppercase bg-slate-900 px-1 rounded">{alert.condition}</span>
+                    </div>
+                    <button 
+                      onClick={() => deleteAlert(alert.id)}
+                      className="text-slate-500 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

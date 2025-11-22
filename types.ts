@@ -100,3 +100,10 @@ export interface ParsedSignal {
   sl?: number;
   tp?: number;
 }
+
+export interface AutoTradeConfig {
+  lotSize: number;
+  stopLossPips: number;
+  takeProfitPips: number;
+  maxSpreadPips: number;
+}

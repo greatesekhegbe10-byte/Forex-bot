@@ -1,8 +1,8 @@
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Activity, RefreshCw, ChevronDown, Settings, LogOut } from 'lucide-react';
-import { generateMarketData, analyzeMarket, fetchMetaApiCandles } from './services/forexService';
-import { Candle, MarketAnalysis, AuthState, MetaApiConfig, User, AppSettings } from './types';
+import { generateMarketData, analyzeMarket, fetchMetaApiCandles, executeMetaApiTrade } from './services/forexService';
+import { Candle, MarketAnalysis, AuthState, MetaApiConfig, User, AppSettings, AutoTradeConfig, TradeOrder, SignalType } from './types';
 import { ForexChart } from './components/charts/ForexChart';
 import { SignalPanel } from './components/dashboard/SignalPanel';
 import { AIAnalyst } from './components/dashboard/AIAnalyst';
@@ -37,7 +37,19 @@ const App: React.FC = () => {
   const [metaApiConfig, setMetaApiConfig] = useState<MetaApiConfig | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>({ appName: 'ForexBotPro', domainUrl: 'forexbot.pro' });
   const [usingLiveData, setUsingLiveData] = useState(false);
+  
+  // Auto Trading State
   const [isAutoTrading, setIsAutoTrading] = useState(false);
+  const [autoTradeConfig, setAutoTradeConfig] = useState<AutoTradeConfig>({
+    lotSize: 0.01,
+    stopLossPips: 30,
+    takeProfitPips: 60,
+    maxSpreadPips: 3
+  });
+  
+  // Refs for Auto Trading Loop
+  const lastTradeTime = useRef<number>(0);
+  const lastSignalType = useRef<SignalType | null>(null);
 
   // Notification State
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -70,7 +82,16 @@ const App: React.FC = () => {
     if (savedAppSettings) {
       setAppSettings(JSON.parse(savedAppSettings));
     }
+    const savedAutoConfig = localStorage.getItem('auto_trade_config');
+    if (savedAutoConfig) {
+      setAutoTradeConfig(JSON.parse(savedAutoConfig));
+    }
   }, []);
+
+  // Save Auto Config when changed
+  useEffect(() => {
+    localStorage.setItem('auto_trade_config', JSON.stringify(autoTradeConfig));
+  }, [autoTradeConfig]);
 
   // Update Document Title based on App Name
   useEffect(() => {
@@ -140,6 +161,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (auth.isAuthenticated) {
       loadData(activePair, metaApiConfig);
+      // Reset auto-trade cooldowns on pair change
+      lastTradeTime.current = 0;
+      lastSignalType.current = null;
     }
   }, [activePair, auth.isAuthenticated, metaApiConfig]);
 
@@ -186,6 +210,73 @@ const App: React.FC = () => {
     const prev = data[data.length - 2];
     return analyzeMarket(current, prev, activePair);
   }, [data, activePair]);
+
+  // --- AUTO TRADING LOGIC ---
+  useEffect(() => {
+    if (!isAutoTrading || !currentAnalysis || !metaApiConfig) return;
+
+    const now = Date.now();
+    const COOLDOWN_MS = 5 * 60 * 1000; // 5 Minutes cooldown
+
+    // 1. Check Cooldown
+    if (now - lastTradeTime.current < COOLDOWN_MS) return;
+
+    // 2. Check Confidence Threshold (>70%)
+    if (currentAnalysis.confidence <= 70) return;
+
+    // 3. Check for Actionable Signal (BUY or SELL)
+    if (currentAnalysis.signal === SignalType.HOLD) return;
+
+    // 4. Prevent re-entry on same signal type immediately
+    if (currentAnalysis.signal === lastSignalType.current) return;
+
+    // --- EXECUTION ---
+    const executeAutoTrade = async () => {
+      const isBuy = currentAnalysis.signal === SignalType.BUY;
+      
+      // Calculate Price Levels
+      const pipValue = activePair.includes('JPY') ? 0.01 : 0.0001;
+      const price = currentAnalysis.currentPrice;
+      const slPrice = isBuy 
+        ? price - (autoTradeConfig.stopLossPips * pipValue)
+        : price + (autoTradeConfig.stopLossPips * pipValue);
+      const tpPrice = isBuy
+        ? price + (autoTradeConfig.takeProfitPips * pipValue)
+        : price - (autoTradeConfig.takeProfitPips * pipValue);
+
+      const order: TradeOrder = {
+        symbol: activePair,
+        actionType: isBuy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+        volume: autoTradeConfig.lotSize,
+        stopLoss: parseFloat(slPrice.toFixed(activePair.includes('JPY') ? 2 : 4)),
+        takeProfit: parseFloat(tpPrice.toFixed(activePair.includes('JPY') ? 2 : 4)),
+        comment: `AutoBot ${currentAnalysis.confidence}% Conf`
+      };
+
+      logger.info("Attempting Auto-Trade", order);
+      notify('info', 'Auto-Trading', `Executing ${order.actionType} on ${activePair}...`);
+
+      try {
+        await executeMetaApiTrade(metaApiConfig, order);
+        
+        notify('success', 'Auto-Trade Executed', `${isBuy ? 'BUY' : 'SELL'} ${autoTradeConfig.lotSize} lots @ ${price.toFixed(5)}`);
+        
+        // Update State Refs
+        lastTradeTime.current = now;
+        lastSignalType.current = currentAnalysis.signal;
+
+      } catch (err: any) {
+        logger.error("Auto-Trade Failed", err);
+        notify('error', 'Auto-Trade Error', err.message || 'Execution failed');
+        // Don't update lastTradeTime so it can retry if conditions persist, 
+        // but maybe implement a shorter retry cooldown in production.
+      }
+    };
+
+    executeAutoTrade();
+
+  }, [currentAnalysis, isAutoTrading, metaApiConfig, autoTradeConfig, activePair]);
+
 
   // -- RENDER --
 
@@ -352,6 +443,8 @@ const App: React.FC = () => {
                         onAutoTradeToggle={setIsAutoTrading}
                         isAutoTrading={isAutoTrading}
                         notify={notify}
+                        autoTradeConfig={autoTradeConfig}
+                        onUpdateAutoConfig={setAutoTradeConfig}
                       />
 
                       <AIAnalyst analysis={currentAnalysis} notify={notify} />
@@ -373,6 +466,12 @@ const App: React.FC = () => {
                               <span className="text-slate-400">Last Tick</span>
                               <span className="text-white font-mono text-sm">{lastUpdate.toLocaleTimeString()}</span>
                            </div>
+                           {isAutoTrading && (
+                               <div className="flex justify-between border-b border-slate-700 pb-2 animate-pulse">
+                                  <span className="text-slate-400">Auto-Trade</span>
+                                  <span className="text-green-400 font-bold">ACTIVE</span>
+                               </div>
+                           )}
                         </div>
                       </div>
                    </div>
