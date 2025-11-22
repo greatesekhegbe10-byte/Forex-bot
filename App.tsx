@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Activity, RefreshCw, ChevronDown, Settings, LogOut } from 'lucide-react';
+import { Activity, RefreshCw, ChevronDown, Settings, LogOut, LayoutDashboard, LineChart, Sparkles } from 'lucide-react';
 import { generateMarketData, analyzeMarket, fetchMetaApiCandles, executeMetaApiTrade } from './services/forexService';
 import { Candle, MarketAnalysis, AuthState, MetaApiConfig, User, AppSettings, AutoTradeConfig, TradeOrder, SignalType } from './types';
 import { ForexChart } from './components/charts/ForexChart';
@@ -141,15 +140,13 @@ const App: React.FC = () => {
           return;
         }
       } catch (err: any) {
-        // We log internal error but show user a warning
         logger.warn("Failed to fetch live data, falling back to simulation");
-        if (usingLiveData) { // Only notify if we were previously live
+        if (usingLiveData) { 
              notify('warning', 'Live Data Disconnected', 'Reverted to simulation mode due to connection error.');
         }
       }
     }
 
-    // Fallback to simulation
     const simData = generateMarketData(pair, 300);
     setData(simData);
     setUsingLiveData(false);
@@ -161,13 +158,12 @@ const App: React.FC = () => {
   useEffect(() => {
     if (auth.isAuthenticated) {
       loadData(activePair, metaApiConfig);
-      // Reset auto-trade cooldowns on pair change
       lastTradeTime.current = 0;
       lastSignalType.current = null;
     }
   }, [activePair, auth.isAuthenticated, metaApiConfig]);
 
-  // Simulate live ticks (only if using simulation data)
+  // Simulate live ticks
   useEffect(() => {
     if (usingLiveData) return; 
 
@@ -180,7 +176,6 @@ const App: React.FC = () => {
         const newPrice = lastCandle.close + (Math.random() - 0.5) * volatility;
         
         const now = new Date();
-        // Create new candle every 5 seconds for demo speed
         if (now.getTime() - new Date(lastCandle.time).getTime() > 5000) {
              const newCandle: Candle = {
                  ...lastCandle,
@@ -216,25 +211,14 @@ const App: React.FC = () => {
     if (!isAutoTrading || !currentAnalysis || !metaApiConfig) return;
 
     const now = Date.now();
-    const COOLDOWN_MS = 5 * 60 * 1000; // 5 Minutes cooldown
-
-    // 1. Check Cooldown
+    const COOLDOWN_MS = 5 * 60 * 1000; 
     if (now - lastTradeTime.current < COOLDOWN_MS) return;
-
-    // 2. Check Confidence Threshold (>70%)
     if (currentAnalysis.confidence <= 70) return;
-
-    // 3. Check for Actionable Signal (BUY or SELL)
     if (currentAnalysis.signal === SignalType.HOLD) return;
-
-    // 4. Prevent re-entry on same signal type immediately
     if (currentAnalysis.signal === lastSignalType.current) return;
 
-    // --- EXECUTION ---
     const executeAutoTrade = async () => {
       const isBuy = currentAnalysis.signal === SignalType.BUY;
-      
-      // Calculate Price Levels
       const pipValue = activePair.includes('JPY') ? 0.01 : 0.0001;
       const price = currentAnalysis.currentPrice;
       const slPrice = isBuy 
@@ -258,18 +242,12 @@ const App: React.FC = () => {
 
       try {
         await executeMetaApiTrade(metaApiConfig, order);
-        
         notify('success', 'Auto-Trade Executed', `${isBuy ? 'BUY' : 'SELL'} ${autoTradeConfig.lotSize} lots @ ${price.toFixed(5)}`);
-        
-        // Update State Refs
         lastTradeTime.current = now;
         lastSignalType.current = currentAnalysis.signal;
-
       } catch (err: any) {
         logger.error("Auto-Trade Failed", err);
         notify('error', 'Auto-Trade Error', err.message || 'Execution failed');
-        // Don't update lastTradeTime so it can retry if conditions persist, 
-        // but maybe implement a shorter retry cooldown in production.
       }
     };
 
@@ -278,18 +256,15 @@ const App: React.FC = () => {
   }, [currentAnalysis, isAutoTrading, metaApiConfig, autoTradeConfig, activePair]);
 
 
-  // -- RENDER --
-
   if (!auth.isAuthenticated) {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen bg-[#020617] text-slate-200 font-sans">
       
       <ToastContainer toasts={toasts} onRemove={removeToast} />
 
-      {/* Settings Modal */}
       <SettingsModal 
         isOpen={showSettings} 
         onClose={() => setShowSettings(false)} 
@@ -298,117 +273,128 @@ const App: React.FC = () => {
         currentAppSettings={appSettings}
       />
 
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-blue-600 rounded-lg shadow-lg shadow-blue-600/20">
-              <Activity className="text-white" size={20} />
-            </div>
-            <div>
-              <h1 className="font-bold text-white text-lg tracking-tight hidden sm:block">{appSettings.appName}</h1>
-              <h1 className="font-bold text-white text-lg tracking-tight sm:hidden">Bot</h1>
-              {appSettings.domainUrl && (
-                <p className="text-[10px] text-slate-500 font-mono hidden sm:block">{appSettings.domainUrl}</p>
-              )}
-            </div>
-            {usingLiveData && (
-              <span className="ml-2 px-2 py-0.5 bg-green-900/50 border border-green-600/50 text-green-400 text-[10px] font-bold rounded uppercase tracking-wider animate-pulse">
-                Live MT5 Data
-              </span>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-4">
-            {/* Pair Selector */}
-            <div className="relative">
-              <select 
-                value={activePair}
-                onChange={(e) => setActivePair(e.target.value)}
-                className="appearance-none bg-slate-800 border border-slate-700 text-white text-sm font-bold py-1.5 pl-3 pr-8 rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 hover:bg-slate-750 transition-colors"
-              >
-                {AVAILABLE_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+      {/* Floating Navbar */}
+      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-[#020617]/80 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
+            
+            {/* Brand */}
+            <div className="flex items-center gap-3">
+              <div className="relative group cursor-pointer">
+                <div className="absolute -inset-1 bg-indigo-500 rounded-full blur opacity-20 group-hover:opacity-40 transition duration-200" />
+                <div className="relative p-2 bg-[#0B0F19] rounded-xl border border-white/10">
+                  <Activity className="text-indigo-400" size={20} />
+                </div>
+              </div>
+              <div>
+                <h1 className="font-bold text-white text-base tracking-tight leading-none flex items-center gap-1">
+                  {appSettings.appName} <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-[9px] text-indigo-400 font-mono">PRO</span>
+                </h1>
+              </div>
             </div>
 
-            {/* Tabs */}
-            <div className="hidden md:flex items-center space-x-1 bg-slate-800/50 p-1 rounded-lg border border-slate-700">
+            {/* Center - Pair Selector & Tabs */}
+            <div className="hidden md:flex items-center gap-4 bg-[#0B0F19] p-1.5 rounded-full border border-white/5">
+               {/* Pair Selector */}
+               <div className="relative group px-2">
+                <select 
+                  value={activePair}
+                  onChange={(e) => setActivePair(e.target.value)}
+                  className="appearance-none bg-transparent text-white text-xs font-bold pr-6 cursor-pointer focus:outline-none"
+                >
+                  {AVAILABLE_PAIRS.map(p => <option key={p} value={p} className="bg-slate-900">{p}</option>)}
+                </select>
+                <ChevronDown className="absolute right-0 top-1/2 transform -translate-y-1/2 text-slate-500 pointer-events-none" size={12} />
+              </div>
+
+              <div className="w-px h-4 bg-white/10 mx-1"></div>
+
               <button 
-                onClick={() => setActiveTab(Tab.DASHBOARD)}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  activeTab === Tab.DASHBOARD ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Live Dashboard
-              </button>
-              <button 
-                onClick={() => setActiveTab(Tab.BACKTEST)}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  activeTab === Tab.BACKTEST ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Strategy Backtest
-              </button>
+                  onClick={() => setActiveTab(Tab.DASHBOARD)}
+                  className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
+                    activeTab === Tab.DASHBOARD 
+                      ? 'bg-slate-800 text-white shadow-inner' 
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <LayoutDashboard size={12} /> Terminal
+                </button>
+                <button 
+                  onClick={() => setActiveTab(Tab.BACKTEST)}
+                  className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
+                    activeTab === Tab.BACKTEST 
+                      ? 'bg-slate-800 text-white shadow-inner' 
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <LineChart size={12} /> Backtest
+                </button>
             </div>
 
-            <div className="flex items-center border-l border-slate-700 pl-4 gap-2">
-              <button 
-                onClick={() => {
-                    loadData(activePair, metaApiConfig);
-                    notify('info', 'Refreshing Data', 'Fetching latest candles...');
-                }}
-                className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors"
-                title="Refresh Data"
-              >
-                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-              </button>
-              
-              <button
-                onClick={() => setShowSettings(true)}
-                className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors"
-                title="Settings"
-              >
-                <Settings size={20} />
-              </button>
+            {/* Right - Actions */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 pl-4">
+                <button 
+                  onClick={() => {
+                      loadData(activePair, metaApiConfig);
+                      notify('info', 'Refreshing Data', 'Fetching latest candles...');
+                  }}
+                  className="p-2 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 transition-all"
+                  title="Refresh Data"
+                >
+                  <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                </button>
+                
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+                  title="Settings"
+                >
+                  <Settings size={18} />
+                </button>
 
-              <button
-                onClick={handleLogout}
-                className="p-2 hover:bg-red-900/20 rounded-full text-slate-400 hover:text-red-400 transition-colors"
-                title="Logout"
-              >
-                <LogOut size={20} />
-              </button>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                  title="Logout"
+                >
+                  <LogOut size={18} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Mobile Tabs */}
-        <div className="md:hidden flex mb-6 p-1 bg-slate-800/50 rounded-lg border border-slate-700">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        
+        {/* Mobile Navigation */}
+        <div className="md:hidden grid grid-cols-2 gap-2 p-1 bg-[#0B0F19] rounded-xl border border-white/5">
            <button 
               onClick={() => setActiveTab(Tab.DASHBOARD)}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-all ${
-                activeTab === Tab.DASHBOARD ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              className={`flex items-center justify-center gap-2 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
+                activeTab === Tab.DASHBOARD ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-slate-400'
               }`}
             >
-              Dashboard
+              <LayoutDashboard size={14} /> Terminal
             </button>
             <button 
               onClick={() => setActiveTab(Tab.BACKTEST)}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-all ${
-                activeTab === Tab.BACKTEST ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              className={`flex items-center justify-center gap-2 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
+                activeTab === Tab.BACKTEST ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-slate-400'
               }`}
             >
-              Backtest
+              <LineChart size={14} /> Backtest
             </button>
         </div>
 
         {loading && (
-          <div className="flex flex-col items-center justify-center h-64">
-             <RefreshCw className="animate-spin text-blue-500 mb-4" size={48} />
-             <p className="text-slate-400">Fetching market data...</p>
+          <div className="flex flex-col items-center justify-center h-[60vh]">
+             <div className="relative">
+               <div className="absolute -inset-10 bg-indigo-500/10 rounded-full blur-3xl animate-pulse" />
+               <RefreshCw className="relative animate-spin text-indigo-500" size={48} />
+             </div>
+             <p className="mt-8 text-indigo-200 text-xs font-bold tracking-[0.2em] animate-pulse">ESTABLISHING FEED...</p>
           </div>
         )}
 
@@ -416,26 +402,32 @@ const App: React.FC = () => {
           <>
              {/* Render Dashboard */}
              {activeTab === Tab.DASHBOARD && (
-               <div className="space-y-6 animate-in fade-in duration-500">
+               <div className="space-y-6 animate-in fade-in duration-500 slide-in-from-bottom-4">
                  
                  <SignalPanel analysis={currentAnalysis} />
 
-                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                   <div className="lg:col-span-2 space-y-6">
-                     <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-lg p-4">
-                       <div className="flex justify-between items-center mb-4 px-2">
-                         <h3 className="text-slate-400 text-sm font-bold uppercase">{activePair} Price Action</h3>
-                         <div className="flex gap-2 text-xs">
-                            <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-blue-400"></span> MA 50</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-purple-400"></span> MA 200</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-500"></span> Price</span>
+                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                   {/* Main Chart Area */}
+                   <div className="lg:col-span-8 flex flex-col gap-6">
+                     <div className="bg-[#0B0F19]/70 backdrop-blur-xl border border-white/5 rounded-2xl shadow-2xl overflow-hidden relative group">
+                        {/* Decorative top bar */}
+                       <div className="flex justify-between items-center px-5 py-3 border-b border-white/5 bg-white/[0.02]">
+                         <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em] flex items-center gap-2">
+                           <Sparkles size={12} className="text-indigo-400" /> Technical Overview
+                         </h3>
+                         <div className="flex gap-4 text-[9px] font-mono uppercase tracking-wider text-slate-500">
+                            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_#3b82f6]"></div> MA 50</span>
+                            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-500 shadow-[0_0_5px_#a855f7]"></div> MA 200</span>
                          </div>
                        </div>
-                       <ForexChart data={data} pair={activePair} />
+                       <div className="p-1 relative min-h-[450px]">
+                         <ForexChart data={data} pair={activePair} />
+                       </div>
                      </div>
                    </div>
 
-                   <div className="lg:col-span-1 space-y-6">
+                   {/* Side Panel */}
+                   <div className="lg:col-span-4 space-y-6">
                       <TradePanel 
                         activePair={activePair} 
                         currentPrice={currentAnalysis.currentPrice}
@@ -449,29 +441,22 @@ const App: React.FC = () => {
 
                       <AIAnalyst analysis={currentAnalysis} notify={notify} />
 
-                      <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-lg p-6">
-                        <h3 className="text-slate-400 text-sm font-bold uppercase mb-4">Bot Statistics</h3>
-                        <div className="space-y-4">
-                           <div className="flex justify-between border-b border-slate-700 pb-2">
-                              <span className="text-slate-400">Data Source</span>
-                              <span className={`font-bold ${usingLiveData ? 'text-green-400' : 'text-yellow-400'}`}>
-                                {usingLiveData ? 'MetaAPI (Live)' : 'Simulation'}
-                              </span>
+                      <div className="bg-[#0B0F19]/50 backdrop-blur-md border border-white/5 rounded-2xl p-5">
+                        <h3 className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mb-4">Connection Status</h3>
+                        <div className="space-y-2">
+                           <div className="flex justify-between items-center p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                              <span className="text-xs text-slate-400">Data Feed</span>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-1.5 h-1.5 rounded-full ${usingLiveData ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                                <span className="text-xs font-bold text-slate-200">
+                                    {usingLiveData ? 'MetaAPI Live' : 'Simulation'}
+                                </span>
+                              </div>
                            </div>
-                           <div className="flex justify-between border-b border-slate-700 pb-2">
-                              <span className="text-slate-400">Pair</span>
-                              <span className="text-white font-bold">{activePair}</span>
+                           <div className="flex justify-between items-center p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                              <span className="text-xs text-slate-400">Last Update</span>
+                              <span className="text-xs text-indigo-300 font-mono">{lastUpdate.toLocaleTimeString()}</span>
                            </div>
-                           <div className="flex justify-between border-b border-slate-700 pb-2">
-                              <span className="text-slate-400">Last Tick</span>
-                              <span className="text-white font-mono text-sm">{lastUpdate.toLocaleTimeString()}</span>
-                           </div>
-                           {isAutoTrading && (
-                               <div className="flex justify-between border-b border-slate-700 pb-2 animate-pulse">
-                                  <span className="text-slate-400">Auto-Trade</span>
-                                  <span className="text-green-400 font-bold">ACTIVE</span>
-                               </div>
-                           )}
                         </div>
                       </div>
                    </div>
