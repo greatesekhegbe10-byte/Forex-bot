@@ -55,7 +55,6 @@ export const calculateRSI = (closes: number[], period: number = 14): number | un
 // --- Data Generation (Fallback) ---
 
 export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300, timeframe: string = '1h'): Candle[] => {
-  // logger.debug(`Generating simulation data for ${pair} on ${timeframe}`);
   const config = PAIR_CONFIGS[pair] || PAIR_CONFIGS['EUR/USD'];
   
   // Adjust volatility based on timeframe
@@ -95,7 +94,6 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
     
     // Simulate OHLC mechanics
     const open = prevClose; 
-    // Randomize High/Low around Open/Close
     const bodyMax = Math.max(open, close);
     const bodyMin = Math.min(open, close);
     const high = bodyMax + Math.random() * (adjustedVolatility * 0.4);
@@ -129,9 +127,7 @@ export const fetchMetaApiCandles = async (
   timeframe: string = '1h', 
   count: number = 300
 ): Promise<Candle[]> => {
-  // Only MT5 supports direct historical data fetching in this app context
   if (config.type !== BrokerType.MT5 || !config.accountId || !config.accessToken) {
-    // Return empty to trigger fallback generation
     return [];
   }
 
@@ -142,7 +138,6 @@ export const fetchMetaApiCandles = async (
   logger.info(`Fetching MetaAPI candles`, { pair, timeframe, region });
 
   try {
-    // Approximate start time calculation
     let minutes = count * 60; // default 1h
     if (timeframe === '1m') minutes = count;
     if (timeframe === '5m') minutes = count * 5;
@@ -208,7 +203,6 @@ export const fetchMetaApiCandles = async (
 
 export const fetchAccountInfo = async (config: BrokerConfig): Promise<MetaAccountInfo> => {
     if (config.type !== BrokerType.MT5) {
-      // Return dummy data for other brokers as we can't fetch real balance easily without backend
       return { balance: 0, equity: 0, margin: 0, freeMargin: 0, currency: 'USD', leverage: 100 };
     }
 
@@ -263,7 +257,7 @@ export const fetchOpenPositions = async (config: BrokerConfig): Promise<MetaPosi
         return positions.map((p: any) => ({
             id: p.id,
             symbol: p.symbol,
-            type: p.type, // POSITION_TYPE_BUY or POSITION_TYPE_SELL
+            type: p.type, 
             volume: p.volume,
             openPrice: p.openPrice,
             currentPrice: p.currentPrice,
@@ -273,7 +267,6 @@ export const fetchOpenPositions = async (config: BrokerConfig): Promise<MetaPosi
             time: p.time
         }));
     } catch (error: any) {
-        // logger.error("Positions Error", error.message);
         return [];
     }
 };
@@ -308,7 +301,6 @@ export const closeMetaApiPosition = async (config: BrokerConfig, positionId: str
 export const executeBrokerTrade = async (config: BrokerConfig, order: TradeOrder) => {
   logger.info(`Initiating Trade via ${config.type}`, order);
 
-  // 1. MetaTrader 5 Execution
   if (config.type === BrokerType.MT5) {
       if (!config.accountId || !config.accessToken) throw new Error("Invalid MT5 Broker Configuration");
       const region = config.region || 'new-york';
@@ -338,20 +330,18 @@ export const executeBrokerTrade = async (config: BrokerConfig, order: TradeOrder
       return await response.json();
   } 
   
-  // 2. Other Brokers (Webhook/API Bridge)
   else if (config.type === BrokerType.IQ_OPTION || config.type === BrokerType.POCKET_OPTION || config.type === BrokerType.CUSTOM_WEBHOOK) {
       if (!config.webhookUrl) {
           throw new Error(`${config.type} requires a Bridge/Webhook URL to execute trades.`);
       }
 
-      // Format payload for generic binary/forex bridge
       const payload = {
         broker: config.type,
         symbol: order.symbol,
-        action: order.actionType === 'ORDER_TYPE_BUY' ? 'CALL' : 'PUT', // Binary terminology
-        amount: order.volume, // often represents $ amount in binary options
-        type: 'digital', // or turbo, binary
-        expiration: 5, // default 5m
+        action: order.actionType === 'ORDER_TYPE_BUY' ? 'CALL' : 'PUT',
+        amount: order.volume, 
+        type: 'digital', 
+        expiration: 5,
         apiKey: config.apiKey
       };
 
@@ -365,8 +355,6 @@ export const executeBrokerTrade = async (config: BrokerConfig, order: TradeOrder
         if (!response.ok) throw new Error(`Bridge Error: ${response.statusText}`);
         return { status: 'sent', payload };
       } catch (e: any) {
-         // Since many bridges run on localhost (e.g. tradingview hooks), fetch might fail due to mixed content/cors
-         // We log success for demonstration if strictly client-side
          logger.warn(`Bridge fetch failed (likely CORS or invalid URL). Trade logged.`, payload);
          return { status: 'logged', payload };
       }
@@ -375,13 +363,13 @@ export const executeBrokerTrade = async (config: BrokerConfig, order: TradeOrder
   throw new Error("Unknown Broker Type");
 };
 
-// Alias for backward compatibility if needed, but updated to use new router
 export const executeMetaApiTrade = executeBrokerTrade;
 
 // --- Signal Parsing ---
 
 export const parseSignalText = (text: string): ParsedSignal => {
   try {
+      if (!text) return {};
       const normalizedText = text.toUpperCase().replace(/\//g, '');
       const signal: ParsedSignal = {};
 
@@ -395,6 +383,7 @@ export const parseSignalText = (text: string): ParsedSignal => {
       const extractNumber = (keywords: string[]) => {
         for (const kw of keywords) {
           const safeKw = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+          // Fix: properly use backticks for template literal regex
           const regex = new RegExp(`${safeKw}\\s*[:@]?\\s*([0-9]+\\.?[0-9]*)`);
           const match = normalizedText.match(regex);
           if (match) return parseFloat(match[1]);
@@ -413,7 +402,7 @@ export const parseSignalText = (text: string): ParsedSignal => {
   }
 };
 
-// --- Analysis Logic (Unchanged) ---
+// --- Analysis Logic ---
 export const analyzeMarket = (candle: Candle, prevCandle: Candle, pair: string): MarketAnalysis => {
   const ma50 = candle.ma50 || 0;
   const ma200 = candle.ma200 || 0;

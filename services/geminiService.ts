@@ -4,7 +4,7 @@ import { MarketAnalysis, GeminiAnalysisResult } from '../types';
 import { logger } from './logger';
 
 export const generateMarketInsight = async (analysis: MarketAnalysis, apiKeyOverride?: string): Promise<GeminiAnalysisResult> => {
-  // Priority: Manual Key -> Environment Variable
+  // Priority: Manual Key (Settings) -> Environment Variable (Build)
   const apiKey = apiKeyOverride || process.env.API_KEY;
 
   if (!apiKey) {
