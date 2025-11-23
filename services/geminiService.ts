@@ -1,15 +1,16 @@
+
 import { GoogleGenAI, Type } from '@google/genai';
 import { MarketAnalysis, GeminiAnalysisResult } from '../types';
 import { logger } from './logger';
 
-export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<GeminiAnalysisResult> => {
-  // Lazily access the key to prevent initialization errors during module load
-  const apiKey = process.env.API_KEY;
+export const generateMarketInsight = async (analysis: MarketAnalysis, apiKeyOverride?: string): Promise<GeminiAnalysisResult> => {
+  // Priority: Manual Key -> Environment Variable
+  const apiKey = apiKeyOverride || process.env.API_KEY;
 
   if (!apiKey) {
-    const msg = "Gemini API Key is missing. Please check your .env file or build configuration.";
+    const msg = "Gemini API Key is missing. Please go to Settings > General and enter your API Key.";
     logger.error(msg);
-    throw new Error("AI Service Unavailable: API Key missing");
+    throw new Error(msg);
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -38,7 +39,12 @@ export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<G
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    // Create a promise that rejects after 15 seconds
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error("AI Analysis Timed Out (15s)")), 15000)
+    );
+
+    const apiCallPromise = ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
@@ -59,6 +65,9 @@ export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<G
       }
     });
 
+    // Race the API call against the timeout
+    const response = await Promise.race([apiCallPromise, timeoutPromise]);
+
     const text = response.text;
     if (!text) throw new Error("Empty response from AI model");
     
@@ -68,14 +77,13 @@ export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<G
     return result;
 
   } catch (error: any) {
-    // Handle specific API errors gracefully
     const errorMessage = error.message || "Unknown AI Error";
     logger.error("Gemini API Failed", errorMessage);
     
-    if (errorMessage.includes('401') || errorMessage.includes('key')) {
-        throw new Error("Invalid API Key. Please check configuration.");
+    if (errorMessage.includes('401') || errorMessage.includes('key') || errorMessage.includes('PERMISSION_DENIED')) {
+        throw new Error("Invalid API Key. Check Settings.");
     }
     
-    throw new Error("AI Analysis failed. Please try again later.");
+    throw new Error(errorMessage);
   }
 };

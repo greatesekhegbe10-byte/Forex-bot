@@ -1,18 +1,23 @@
+
 import React, { useState, useEffect } from 'react';
-import { Zap, Clipboard, Copy, AlertOctagon, Calculator, CheckCircle2, Bell, Trash2, Settings2, ArrowRightLeft, Crosshair } from 'lucide-react';
-import { MetaApiConfig, TradeOrder, AutoTradeConfig } from '../../types';
-import { parseSignalText, executeMetaApiTrade } from '../../services/forexService';
+import { Zap, Clipboard, Bell, ArrowRightLeft, Briefcase, Wallet, Trash2, XCircle } from 'lucide-react';
+import { BrokerConfig, TradeOrder, AutoTradeConfig, MetaAccountInfo, MetaPosition } from '../../types';
+import { parseSignalText, executeBrokerTrade, closeMetaApiPosition } from '../../services/forexService';
 import { ToastType } from '../ui/Toast';
 
 interface TradePanelProps {
   activePair: string;
   currentPrice: number;
-  metaApiConfig: MetaApiConfig | null;
+  brokerConfig: BrokerConfig | null;
   onAutoTradeToggle: (enabled: boolean) => void;
   isAutoTrading: boolean;
   notify: (type: ToastType, title: string, message: string) => void;
   autoTradeConfig: AutoTradeConfig;
   onUpdateAutoConfig: (config: AutoTradeConfig) => void;
+  beginnerMode: boolean;
+  accountInfo: MetaAccountInfo | null;
+  positions: MetaPosition[];
+  onRefreshBrokerData: () => void;
 }
 
 interface PriceAlert {
@@ -25,66 +30,42 @@ interface PriceAlert {
 export const TradePanel: React.FC<TradePanelProps> = ({ 
   activePair, 
   currentPrice, 
-  metaApiConfig,
+  brokerConfig,
   onAutoTradeToggle,
   isAutoTrading,
   notify,
   autoTradeConfig,
-  onUpdateAutoConfig
+  onUpdateAutoConfig,
+  beginnerMode,
+  accountInfo,
+  positions,
+  onRefreshBrokerData
 }) => {
-  const [tab, setTab] = useState<'manual' | 'parser' | 'auto' | 'alerts'>('manual');
+  const [tab, setTab] = useState<'manual' | 'portfolio' | 'parser' | 'auto' | 'alerts'>('manual');
   
-  // Trade Form State
   const [lotSize, setLotSize] = useState<number>(0.01);
   const [stopLoss, setStopLoss] = useState<string>('');
   const [takeProfit, setTakeProfit] = useState<string>('');
   const [isExecuting, setIsExecuting] = useState(false);
-
-  // Parser State
   const [pasteText, setPasteText] = useState('');
-
-  // Alerts State
   const [priceAlerts, setPriceAlerts] = useState<PriceAlert[]>([]);
   const [alertTarget, setAlertTarget] = useState<string>('');
 
-  // Update SL/TP defaults when pair/price changes
   useEffect(() => {
     if (activePair && currentPrice) {
       const pip = activePair.includes('JPY') ? 0.01 : 0.0001;
-      // Only set defaults if empty to avoid overwriting user input during live updates
       if (!stopLoss) setStopLoss((currentPrice - 50 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
       if (!takeProfit) setTakeProfit((currentPrice + 100 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
       if (!alertTarget) setAlertTarget(currentPrice.toFixed(activePair.includes('JPY') ? 2 : 4));
     }
   }, [activePair, currentPrice]);
 
-  // Monitor Alerts
-  useEffect(() => {
-    if (!currentPrice) return;
-    setPriceAlerts(prev => {
-      const nextAlerts = prev.filter(alert => {
-        if (alert.pair !== activePair) return true;
-        const hit = 
-          (alert.condition === 'ABOVE' && currentPrice >= alert.target) ||
-          (alert.condition === 'BELOW' && currentPrice <= alert.target);
-        if (hit) {
-          notify('info', 'Price Alert Triggered', `${alert.pair} hit ${alert.target}`);
-          return false; 
-        }
-        return true; 
-      });
-      return nextAlerts.length !== prev.length ? nextAlerts : prev;
-    });
-  }, [currentPrice, activePair, notify]);
-
   const handleExecute = async (type: 'BUY' | 'SELL') => {
-    if (!metaApiConfig) {
-      notify('error', 'Configuration Missing', 'Please configure Broker Connection in Settings.');
+    if (!brokerConfig) {
+      notify('error', 'Configuration Missing', 'Please connect your broker account in Settings.');
       return;
     }
-    
     setIsExecuting(true);
-
     try {
       const order: TradeOrder = {
         symbol: activePair,
@@ -93,26 +74,37 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         stopLoss: parseFloat(stopLoss) || undefined,
         takeProfit: parseFloat(takeProfit) || undefined
       };
-
-      await executeMetaApiTrade(metaApiConfig, order);
-      notify('success', 'Trade Executed', `${type} Order placed successfully on ${activePair}`);
+      await executeBrokerTrade(brokerConfig, order);
+      notify('success', 'Order Sent', `Successfully sent ${type} request to ${brokerConfig.type}.`);
+      onRefreshBrokerData();
     } catch (error: any) {
-      notify('error', 'Trade Failed', error.message || 'Unknown error occurred');
+      notify('error', 'Trade Failed', error.message);
     } finally {
       setIsExecuting(false);
     }
   };
 
+  const handleClosePosition = async (id: string) => {
+      if (!brokerConfig) return;
+      try {
+          await closeMetaApiPosition(brokerConfig, id);
+          notify('success', 'Position Closed', 'Trade closed successfully.');
+          onRefreshBrokerData();
+      } catch (e: any) {
+          notify('error', 'Close Failed', e.message);
+      }
+  };
+
   const handleParseSignal = () => {
     const signal = parseSignalText(pasteText);
     if (!signal.symbol && !signal.type) {
-        notify('warning', 'Parse Error', 'Could not identify symbol or direction from text.');
+        notify('warning', 'Parse Error', 'Could not find symbol or direction.');
         return;
     }
     if (signal.sl) setStopLoss(signal.sl.toString());
     if (signal.tp) setTakeProfit(signal.tp.toString());
     if (signal.type) {
-        notify('success', 'Signal Parsed', `Identified ${signal.type} signal. Review details before execution.`);
+        notify('success', 'Signal Parsed', `Identified ${signal.type}.`);
         setTab('manual');
     }
   };
@@ -124,14 +116,9 @@ export const TradePanel: React.FC<TradePanelProps> = ({
       return;
     }
     const condition = target > currentPrice ? 'ABOVE' : 'BELOW';
-    const newAlert: PriceAlert = {
-      id: Math.random().toString(36).substr(2, 9),
-      pair: activePair,
-      target,
-      condition
-    };
+    const newAlert: PriceAlert = { id: Math.random().toString(36).substr(2, 9), pair: activePair, target, condition };
     setPriceAlerts(prev => [...prev, newAlert]);
-    notify('success', 'Alert Set', `Notify when ${activePair} goes ${condition} ${target}`);
+    notify('success', 'Alert Set', `Notification set for ${target}`);
   };
 
   const deleteAlert = (id: string) => {
@@ -139,107 +126,109 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   };
 
   const updateAutoConfig = (field: keyof AutoTradeConfig, value: number) => {
-    onUpdateAutoConfig({
-      ...autoTradeConfig,
-      [field]: value
-    });
-  };
-
-  const copyToClipboard = (text: string, label: string) => {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
-    notify('success', 'Copied', `${label} copied to clipboard`);
+    onUpdateAutoConfig({ ...autoTradeConfig, [field]: value });
   };
 
   return (
-    <div className="bg-[#0B0F19]/70 backdrop-blur-xl border border-white/5 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-full relative group">
-      {/* Border Gradient on Hover */}
-      <div className="absolute inset-0 border border-transparent group-hover:border-indigo-500/20 rounded-2xl transition-colors pointer-events-none" />
+    <div className="bg-[#18181b] border border-[#27272a] rounded-xl overflow-hidden flex flex-col h-full">
+      
+      {/* Account Summary Header */}
+      {accountInfo && (
+          <div className="px-4 py-2 bg-[#09090b] border-b border-[#27272a] flex justify-between items-center text-xs">
+              <div className="flex items-center gap-2">
+                  <Wallet size={12} className="text-blue-500" />
+                  <span className="text-[#a1a1aa]">Balance:</span>
+                  <span className="font-mono text-white">${accountInfo.balance.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                  <span className="text-[#a1a1aa]">Equity:</span>
+                  <span className={`font-mono font-bold ${accountInfo.equity >= accountInfo.balance ? 'text-green-400' : 'text-red-400'}`}>
+                      ${accountInfo.equity.toFixed(2)}
+                  </span>
+              </div>
+          </div>
+      )}
 
-      {/* Navigation Tabs */}
-      <div className="flex p-1.5 bg-black/40 border-b border-white/5 gap-1 mx-2 mt-2 rounded-xl">
+      <div className="flex p-1 border-b border-[#27272a]">
         {[
-          { id: 'manual', label: 'Manual', icon: ArrowRightLeft },
+          { id: 'manual', label: 'Trade', icon: ArrowRightLeft },
+          { id: 'portfolio', label: 'Positions', icon: Briefcase },
           { id: 'parser', label: 'Parser', icon: Clipboard },
-          { id: 'auto', label: 'Auto Bot', icon: Zap },
+          { id: 'auto', label: 'Auto', icon: Zap },
           { id: 'alerts', label: 'Alerts', icon: Bell }
         ].map((item) => (
           <button 
             key={item.id}
             onClick={() => setTab(item.id as any)}
-            className={`flex-1 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex flex-col items-center gap-1 ${
+            className={`flex-1 py-3 text-xs font-medium flex flex-col items-center gap-1.5 ${
               tab === item.id 
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' 
-                : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'
+                ? 'text-blue-500 bg-[#27272a]' 
+                : 'text-[#a1a1aa] hover:text-white hover:bg-[#27272a]/50'
             }`}
           >
-            <item.icon size={14} />
-            {item.label}
+            <item.icon size={16} />
+            <span className="hidden sm:inline">{item.label}</span>
           </button>
         ))}
       </div>
 
-      <div className="p-5 flex-1 flex flex-col">
+      <div className="p-6 flex-1 flex flex-col">
         
-        {/* MANUAL TRADE TAB */}
         {tab === 'manual' && (
-          <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="flex items-center justify-between bg-[#020617] p-3 rounded-xl border border-white/10">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-500/10 rounded-lg">
-                  <Crosshair size={16} className="text-indigo-400" />
-                </div>
-                <div>
-                  <span className="text-slate-500 text-[9px] uppercase font-bold tracking-wider block">Active Asset</span>
-                  <span className="text-white font-mono font-bold text-base tracking-tight">{activePair}</span>
-                </div>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[#a1a1aa] text-xs font-medium">Current Price</p>
+                <p className="text-2xl font-bold font-mono text-white">{currentPrice.toFixed(5)}</p>
               </div>
               <div className="text-right">
-                  <span className="text-slate-500 text-[9px] uppercase font-bold tracking-wider block">Bid</span>
-                  <span className="text-emerald-400 font-mono font-bold">{currentPrice.toFixed(5)}</span>
+                <p className="text-[#a1a1aa] text-xs font-medium">Pair</p>
+                <p className="text-lg font-bold text-white">{activePair}</p>
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
-               <div>
-                 <label className="text-[10px] text-slate-400 font-bold uppercase mb-2 block tracking-wide">Lot Size</label>
-                 <div className="relative group">
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      value={lotSize}
-                      onChange={(e) => setLotSize(parseFloat(e.target.value))}
-                      className="w-full bg-[#020617] border border-slate-800 focus:border-indigo-500/50 rounded-lg py-3 pl-3 pr-8 text-white text-right font-mono text-sm focus:ring-1 focus:ring-indigo-500/50 outline-none transition-all"
-                    />
+            <div className="space-y-1.5">
+               <label className="text-xs font-medium text-[#a1a1aa]">Volume (Lots / Amount)</label>
+               {beginnerMode ? (
+                 <div className="grid grid-cols-3 gap-2">
+                    {[0.01, 0.05, 0.10].map(size => (
+                      <button 
+                        key={size}
+                        onClick={() => setLotSize(size)} 
+                        className={`py-2 text-xs font-medium rounded border ${lotSize === size ? 'bg-blue-600 border-blue-600 text-white' : 'bg-[#27272a] border-[#3f3f46] text-[#d4d4d8]'}`}
+                      >
+                        {size}
+                      </button>
+                    ))}
                  </div>
-               </div>
-               <div className="flex items-end pb-1">
-                  <div className="text-right w-full bg-white/5 rounded-lg p-2 border border-white/5">
-                    <span className="text-[9px] text-slate-500 uppercase font-bold">Est. Val / Pip</span>
-                    <p className="text-sm text-indigo-300 font-mono font-bold">~${(lotSize * 10).toFixed(2)}</p>
-                  </div>
-               </div>
+               ) : (
+                 <input 
+                   type="number" 
+                   step="0.01"
+                   value={lotSize}
+                   onChange={(e) => setLotSize(parseFloat(e.target.value))}
+                   className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-3 text-white text-sm focus:border-blue-600 outline-none font-mono"
+                 />
+               )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-               <div>
-                 <label className="text-[10px] text-slate-400 font-bold uppercase mb-2 block tracking-wide text-rose-400">Stop Loss</label>
+               <div className="space-y-1.5">
+                 <label className="text-xs font-medium text-[#a1a1aa]">Stop Loss</label>
                  <input 
                    type="number" 
-                   step="0.0001"
                    value={stopLoss}
                    onChange={(e) => setStopLoss(e.target.value)}
-                   className="w-full bg-[#020617] border border-rose-900/20 focus:border-rose-500/50 rounded-lg py-3 px-3 text-rose-400 text-right font-mono text-sm focus:ring-1 focus:ring-rose-500/20 outline-none transition-all"
+                   className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-3 text-rose-400 text-sm focus:border-rose-500 outline-none font-mono"
                  />
                </div>
-               <div>
-                 <label className="text-[10px] text-slate-400 font-bold uppercase mb-2 block tracking-wide text-emerald-400">Take Profit</label>
+               <div className="space-y-1.5">
+                 <label className="text-xs font-medium text-[#a1a1aa]">Take Profit</label>
                  <input 
                    type="number" 
-                   step="0.0001"
                    value={takeProfit}
                    onChange={(e) => setTakeProfit(e.target.value)}
-                   className="w-full bg-[#020617] border border-emerald-900/20 focus:border-emerald-500/50 rounded-lg py-3 px-3 text-emerald-400 text-right font-mono text-sm focus:ring-1 focus:ring-emerald-500/20 outline-none transition-all"
+                   className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-3 text-emerald-400 text-sm focus:border-emerald-500 outline-none font-mono"
                  />
                </div>
             </div>
@@ -248,103 +237,168 @@ export const TradePanel: React.FC<TradePanelProps> = ({
               <button
                 onClick={() => handleExecute('SELL')}
                 disabled={isExecuting}
-                className="group relative bg-gradient-to-b from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-rose-900/30 transition-all active:scale-[0.98]"
+                className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 font-bold py-3 rounded-lg transition-colors text-sm"
               >
-                 <span className="relative flex justify-center items-center gap-2 text-sm tracking-wider">{isExecuting ? '...' : 'SELL'}</span>
+                 {isExecuting ? 'Sending...' : 'Sell / Put'}
               </button>
               <button
                 onClick={() => handleExecute('BUY')}
                 disabled={isExecuting}
-                className="group relative bg-gradient-to-b from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-900/30 transition-all active:scale-[0.98]"
+                className="bg-green-500/10 hover:bg-green-500/20 text-green-500 border border-green-500/20 font-bold py-3 rounded-lg transition-colors text-sm"
               >
-                 <span className="relative flex justify-center items-center gap-2 text-sm tracking-wider">{isExecuting ? '...' : 'BUY'}</span>
+                 {isExecuting ? 'Sending...' : 'Buy / Call'}
               </button>
             </div>
           </div>
         )}
 
-        {/* PARSER TAB */}
+        {tab === 'portfolio' && (
+            <div className="flex-1 flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-bold text-white">Open Positions</h3>
+                    <button onClick={onRefreshBrokerData} className="text-xs text-blue-500 hover:text-blue-400">Refresh</button>
+                </div>
+                {positions.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-[#52525b]">
+                        <Briefcase size={32} className="mb-2 opacity-50" />
+                        <p className="text-xs">No open positions.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-3 overflow-y-auto max-h-[300px] pr-1">
+                        {positions.map(pos => (
+                            <div key={pos.id} className="bg-[#27272a] p-3 rounded-lg border border-[#3f3f46]">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold text-white">{pos.symbol}</span>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${pos.type.includes('BUY') ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'}`}>
+                                                {pos.type.includes('BUY') ? 'BUY' : 'SELL'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-[#a1a1aa] mt-0.5">{pos.volume} lots @ {pos.openPrice}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className={`font-mono font-bold ${pos.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                            ${pos.profit.toFixed(2)}
+                                        </p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => handleClosePosition(pos.id)}
+                                    className="w-full py-1.5 bg-[#3f3f46] hover:bg-red-500/20 hover:text-red-400 text-xs text-[#d4d4d8] rounded transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <XCircle size={12} /> Close Position
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        )}
+
         {tab === 'parser' && (
-          <div className="space-y-4 h-full flex flex-col animate-in fade-in duration-300">
-            <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-xl p-3 flex gap-3">
-              <div className="p-2 bg-indigo-500/20 rounded-lg shrink-0 h-fit">
-                <Clipboard size={16} className="text-indigo-400" />
-              </div>
-              <div>
-                <p className="text-xs text-indigo-200 font-bold">Smart Parser</p>
-                <p className="text-[10px] text-indigo-300/70 leading-tight mt-0.5">Paste signals from Telegram/WhatsApp. AI extracts price, SL, and TP.</p>
-              </div>
+          <div className="space-y-4">
+            <div className="bg-[#27272a] rounded-lg p-3">
+                <p className="text-xs text-[#d4d4d8] leading-relaxed">
+                  Paste your signal text below. The system will automatically extract Entry, Stop Loss, and Take Profit levels.
+                </p>
             </div>
             <textarea
-              className="flex-1 w-full bg-[#020617] border border-slate-800 rounded-xl p-4 text-sm text-slate-300 font-mono focus:ring-1 focus:ring-indigo-500/50 outline-none resize-none transition-all focus:border-indigo-500/50"
-              placeholder="Paste signal text here..."
+              className="w-full h-32 bg-[#09090b] border border-[#27272a] rounded-lg p-3 text-sm text-white font-mono focus:border-blue-600 outline-none resize-none"
+              placeholder="EURUSD BUY @ 1.0500..."
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
             <button
               onClick={handleParseSignal}
-              className="w-full bg-slate-800 hover:bg-indigo-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
             >
-              <Zap size={16} /> Extract Data
+              Extract Signal
             </button>
           </div>
         )}
 
-        {/* AUTO BOT TAB */}
         {tab === 'auto' && (
-          <div className="space-y-5 animate-in fade-in duration-300">
-            <div className={`p-5 rounded-2xl border transition-all duration-500 ${isAutoTrading ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-slate-800/30 border-slate-700'}`}>
-               <div className="flex items-center justify-between mb-2">
-                 <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                   <Zap size={16} className={isAutoTrading ? 'text-emerald-400 fill-emerald-400' : 'text-slate-500'} />
-                   Algorithmic Execution
-                 </h4>
-                 <button
+          <div className="space-y-5 overflow-y-auto pr-1 max-h-[400px]">
+            <div className="flex items-center justify-between p-4 bg-[#27272a]/50 rounded-lg border border-[#27272a]">
+               <div>
+                 <h4 className="text-sm font-bold text-white">Auto-Trading</h4>
+                 <p className="text-xs text-[#a1a1aa] mt-1">
+                   {isAutoTrading ? 'System is active' : 'System is paused'}
+                 </p>
+               </div>
+               <button
                    onClick={() => {
                       onAutoTradeToggle(!isAutoTrading);
-                      notify('info', isAutoTrading ? 'Auto-Trading Disabled' : 'Auto-Trading Enabled', isAutoTrading ? 'Bot execution paused.' : 'Bot active.');
+                      notify('info', isAutoTrading ? 'Paused' : 'Active', 'Trading status updated');
                    }}
-                   className={`shrink-0 w-12 h-6 rounded-full p-0.5 transition-all duration-300 border ${isAutoTrading ? 'bg-emerald-500 border-emerald-400' : 'bg-slate-950 border-slate-700'}`}
+                   className={`w-10 h-5 rounded-full p-0.5 transition-all ${isAutoTrading ? 'bg-green-500' : 'bg-[#3f3f46]'}`}
                  >
-                   <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${isAutoTrading ? 'translate-x-6' : 'translate-x-0.5'}`} />
-                 </button>
-               </div>
-               <p className="text-[10px] text-slate-400">
-                 {isAutoTrading ? 'Bot is analyzing price action for high-probability setups.' : 'Execution engine is offline.'}
-               </p>
+                   <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${isAutoTrading ? 'translate-x-5' : 'translate-x-0'}`} />
+               </button>
             </div>
 
-            <div className="space-y-4 px-1">
-                 <h4 className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                   <Settings2 size={12} /> Strategy Parameters
-                 </h4>
-                 <div>
-                    <label className="text-[10px] text-slate-400 uppercase mb-1.5 block font-bold">Fixed Lot</label>
+            <div className="space-y-4">
+                 <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[#a1a1aa]">Lot Size</label>
                     <input 
                       type="number" 
                       step="0.01"
                       value={autoTradeConfig.lotSize} 
                       onChange={e => updateAutoConfig('lotSize', parseFloat(e.target.value))}
-                      className="w-full bg-[#020617] border border-slate-800 rounded-lg p-3 text-sm text-white font-mono focus:border-indigo-500/50 focus:outline-none"
+                      className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2.5 text-sm text-white font-mono focus:border-blue-600 outline-none"
                     />
                  </div>
                  <div className="grid grid-cols-2 gap-3">
-                   <div>
-                      <label className="text-[10px] text-slate-400 uppercase mb-1.5 block font-bold">SL (Pips)</label>
+                   <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[#a1a1aa]">Stop Loss (Pips)</label>
                       <input 
                         type="number" 
                         value={autoTradeConfig.stopLossPips} 
                         onChange={e => updateAutoConfig('stopLossPips', parseFloat(e.target.value))}
-                        className="w-full bg-[#020617] border border-slate-800 rounded-lg p-3 text-sm text-white font-mono focus:border-indigo-500/50 focus:outline-none"
+                        className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2.5 text-sm text-white font-mono focus:border-blue-600 outline-none"
                       />
                    </div>
-                   <div>
-                      <label className="text-[10px] text-slate-400 uppercase mb-1.5 block font-bold">TP (Pips)</label>
+                   <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[#a1a1aa]">Take Profit (Pips)</label>
                       <input 
                         type="number" 
                         value={autoTradeConfig.takeProfitPips} 
                         onChange={e => updateAutoConfig('takeProfitPips', parseFloat(e.target.value))}
-                        className="w-full bg-[#020617] border border-slate-800 rounded-lg p-3 text-sm text-white font-mono focus:border-indigo-500/50 focus:outline-none"
+                        className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2.5 text-sm text-white font-mono focus:border-blue-600 outline-none"
+                      />
+                   </div>
+                 </div>
+                 
+                 <div className="space-y-1.5 pt-2 border-t border-[#27272a]">
+                    <label className="text-xs font-medium text-[#a1a1aa]">Max Daily Loss (%)</label>
+                    <input 
+                      type="number" 
+                      value={autoTradeConfig.maxDailyLoss} 
+                      onChange={e => updateAutoConfig('maxDailyLoss', parseFloat(e.target.value))}
+                      className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2.5 text-sm text-white font-mono focus:border-blue-600 outline-none"
+                    />
+                 </div>
+                 
+                 <div className="grid grid-cols-2 gap-3">
+                   <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[#a1a1aa]">Start Hour (0-23)</label>
+                      <input 
+                        type="number" 
+                        min="0" max="23"
+                        value={autoTradeConfig.tradingStartHour} 
+                        onChange={e => updateAutoConfig('tradingStartHour', parseFloat(e.target.value))}
+                        className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2.5 text-sm text-white font-mono focus:border-blue-600 outline-none"
+                      />
+                   </div>
+                   <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[#a1a1aa]">End Hour (0-23)</label>
+                      <input 
+                        type="number" 
+                        min="0" max="23"
+                        value={autoTradeConfig.tradingEndHour} 
+                        onChange={e => updateAutoConfig('tradingEndHour', parseFloat(e.target.value))}
+                        className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2.5 text-sm text-white font-mono focus:border-blue-600 outline-none"
                       />
                    </div>
                  </div>
@@ -352,49 +406,35 @@ export const TradePanel: React.FC<TradePanelProps> = ({
           </div>
         )}
 
-        {/* ALERTS TAB */}
         {tab === 'alerts' && (
-          <div className="space-y-5 h-full flex flex-col animate-in fade-in duration-300">
-            <div className="bg-slate-800/30 p-4 rounded-xl border border-white/5">
-              <label className="text-[10px] text-slate-400 uppercase font-bold mb-2 block tracking-widest">Set Price Trigger</label>
-              <div className="flex gap-2">
-                <input 
-                  type="number" 
-                  step="0.0001"
-                  value={alertTarget} 
-                  onChange={e => setAlertTarget(e.target.value)} 
-                  className="w-full bg-[#020617] border border-slate-800 rounded-lg p-2.5 text-sm font-mono text-white focus:ring-1 focus:ring-blue-500/50 outline-none" 
-                  placeholder="0.00000"
-                />
-                <button 
-                  onClick={handleSetAlert}
-                  className="px-5 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-bold text-xs transition-colors shadow-lg shadow-blue-900/20"
-                >
-                  Add
-                </button>
-              </div>
+          <div className="space-y-4 h-full flex flex-col">
+            <div className="flex gap-2">
+              <input 
+                type="number" 
+                step="0.0001"
+                value={alertTarget} 
+                onChange={e => setAlertTarget(e.target.value)} 
+                className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-2.5 text-sm font-mono text-white focus:border-blue-600 outline-none" 
+                placeholder="Price..."
+              />
+              <button 
+                onClick={handleSetAlert}
+                className="px-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium text-xs transition-colors"
+              >
+                Add
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-              <h4 className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2 mb-3">Active Alerts</h4>
+            <div className="flex-1 overflow-y-auto space-y-2">
               {priceAlerts.length === 0 && (
-                 <div className="text-center py-8 opacity-50">
-                   <Bell size={32} className="mx-auto mb-2 text-slate-600" />
-                   <p className="text-xs text-slate-500">No active alerts</p>
-                 </div>
+                 <p className="text-xs text-[#52525b] text-center py-4">No active alerts</p>
               )}
               {priceAlerts.filter(a => a.pair === activePair).map(alert => (
-                <div key={alert.id} className="flex items-center justify-between bg-[#020617] p-3 rounded-lg border border-white/5 hover:border-white/10 transition-colors group">
+                <div key={alert.id} className="flex items-center justify-between bg-[#27272a] p-3 rounded-lg border border-[#3f3f46]">
+                  <span className="text-xs font-mono text-white">{alert.target}</span>
                   <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${alert.condition === 'ABOVE' ? 'bg-emerald-500' : 'bg-rose-500'} shadow-[0_0_8px_currentColor]`} />
-                    <span className="text-xs font-mono font-bold text-slate-200">{alert.target}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[9px] text-slate-500 font-bold uppercase bg-white/5 px-1.5 py-0.5 rounded">{alert.condition}</span>
-                    <button 
-                      onClick={() => deleteAlert(alert.id)}
-                      className="text-slate-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                    >
+                    <span className="text-[10px] text-[#a1a1aa] font-bold uppercase">{alert.condition}</span>
+                    <button onClick={() => deleteAlert(alert.id)} className="text-[#71717a] hover:text-red-400">
                       <Trash2 size={14} />
                     </button>
                   </div>

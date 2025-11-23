@@ -1,7 +1,8 @@
+
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Activity, RefreshCw, ChevronDown, Settings, LogOut, LayoutDashboard, LineChart, Sparkles } from 'lucide-react';
-import { generateMarketData, analyzeMarket, fetchMetaApiCandles, executeMetaApiTrade } from './services/forexService';
-import { Candle, MarketAnalysis, AuthState, MetaApiConfig, User, AppSettings, AutoTradeConfig, TradeOrder, SignalType } from './types';
+import { Activity, RefreshCw, ChevronDown, Settings, LogOut, LayoutDashboard, LineChart, GraduationCap, Zap, Info } from 'lucide-react';
+import { generateMarketData, analyzeMarket, fetchMetaApiCandles, executeBrokerTrade, fetchAccountInfo, fetchOpenPositions } from './services/forexService';
+import { Candle, MarketAnalysis, AuthState, BrokerConfig, User, AppSettings, AutoTradeConfig, TradeOrder, SignalType, MetaAccountInfo, MetaPosition, BrokerType } from './types';
 import { ForexChart } from './components/charts/ForexChart';
 import { SignalPanel } from './components/dashboard/SignalPanel';
 import { AIAnalyst } from './components/dashboard/AIAnalyst';
@@ -27,23 +28,36 @@ const App: React.FC = () => {
   // App State
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [activePair, setActivePair] = useState<string>('EUR/USD');
+  const [timeframe, setTimeframe] = useState<string>('1h'); 
   const [data, setData] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   
   // Settings & Trading State
   const [showSettings, setShowSettings] = useState(false);
-  const [metaApiConfig, setMetaApiConfig] = useState<MetaApiConfig | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings>({ appName: 'ForexBotPro', domainUrl: 'forexbot.pro' });
+  const [brokerConfig, setBrokerConfig] = useState<BrokerConfig | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>({ 
+    appName: 'ForexBot', 
+    domainUrl: 'forexbot.pro',
+    beginnerMode: true,
+    geminiApiKey: ''
+  });
   const [usingLiveData, setUsingLiveData] = useState(false);
   
+  // Broker Data
+  const [accountInfo, setAccountInfo] = useState<MetaAccountInfo | null>(null);
+  const [positions, setPositions] = useState<MetaPosition[]>([]);
+
   // Auto Trading State
   const [isAutoTrading, setIsAutoTrading] = useState(false);
   const [autoTradeConfig, setAutoTradeConfig] = useState<AutoTradeConfig>({
     lotSize: 0.01,
     stopLossPips: 30,
     takeProfitPips: 60,
-    maxSpreadPips: 3
+    maxSpreadPips: 3,
+    maxDailyLoss: 50,
+    tradingStartHour: 8,
+    tradingEndHour: 20
   });
   
   // Refs for Auto Trading Loop
@@ -57,7 +71,6 @@ const App: React.FC = () => {
   const notify = (type: ToastType, title: string, message: string) => {
     const id = Math.random().toString(36).substr(2, 9);
     setToasts((prev) => [...prev, { id, type, title, message }]);
-    // Auto remove
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 5000);
@@ -69,136 +82,183 @@ const App: React.FC = () => {
 
   // Load Auth & Config from LocalStorage on mount
   useEffect(() => {
-    const savedUser = localStorage.getItem('forex_user');
-    if (savedUser) {
-      setAuth({ isAuthenticated: true, user: JSON.parse(savedUser) });
+    try {
+      const savedUser = localStorage.getItem('forex_user');
+      if (savedUser) {
+        setAuth({ isAuthenticated: true, user: JSON.parse(savedUser) });
+      }
+    } catch (e) {
+      localStorage.removeItem('forex_user');
     }
-    const savedConfig = localStorage.getItem('metaapi_config');
-    if (savedConfig) {
-      setMetaApiConfig(JSON.parse(savedConfig));
+
+    try {
+      const savedConfig = localStorage.getItem('broker_config');
+      if (savedConfig) {
+        setBrokerConfig(JSON.parse(savedConfig));
+      }
+    } catch (e) {
+      console.error("Failed to parse broker config", e);
     }
-    const savedAppSettings = localStorage.getItem('app_settings');
-    if (savedAppSettings) {
-      setAppSettings(JSON.parse(savedAppSettings));
+
+    try {
+      const savedAppSettings = localStorage.getItem('app_settings');
+      if (savedAppSettings) {
+        setAppSettings(JSON.parse(savedAppSettings));
+      }
+    } catch (e) {
+      console.error("Failed to parse app settings", e);
     }
-    const savedAutoConfig = localStorage.getItem('auto_trade_config');
-    if (savedAutoConfig) {
-      setAutoTradeConfig(JSON.parse(savedAutoConfig));
+
+    try {
+      const savedAutoConfig = localStorage.getItem('auto_trade_config');
+      if (savedAutoConfig) {
+        setAutoTradeConfig(JSON.parse(savedAutoConfig));
+      }
+    } catch (e) {
+      console.error("Failed to parse auto trade config", e);
     }
   }, []);
 
-  // Save Auto Config when changed
   useEffect(() => {
     localStorage.setItem('auto_trade_config', JSON.stringify(autoTradeConfig));
   }, [autoTradeConfig]);
-
-  // Update Document Title based on App Name
-  useEffect(() => {
-    document.title = `${activePair} | ${appSettings.appName}`;
-  }, [appSettings.appName, activePair]);
 
   const handleLogin = (email: string, name: string) => {
     const user: User = { id: '1', email, name };
     localStorage.setItem('forex_user', JSON.stringify(user));
     setAuth({ isAuthenticated: true, user });
-    notify('success', 'Login Successful', `Welcome back, ${name}!`);
+    notify('success', 'Welcome!', `Great to see you, ${name}.`);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('forex_user');
     setAuth({ isAuthenticated: false, user: null });
-    notify('info', 'Logged Out', 'You have been signed out securely.');
+    notify('info', 'Logged Out', 'See you next time!');
   };
 
-  const handleSaveSettings = (config: MetaApiConfig, settings: AppSettings) => {
-    setMetaApiConfig(config);
-    localStorage.setItem('metaapi_config', JSON.stringify(config));
+  const handleSaveSettings = (config: BrokerConfig, settings: AppSettings) => {
+    setBrokerConfig(config);
+    localStorage.setItem('broker_config', JSON.stringify(config));
     
     setAppSettings(settings);
     localStorage.setItem('app_settings', JSON.stringify(settings));
 
-    notify('success', 'Settings Saved', 'Configuration updated successfully.');
+    notify('success', 'Settings Saved', 'Configuration updated.');
 
-    // Trigger data reload with new config if it changed
-    if (config.accessToken !== metaApiConfig?.accessToken) {
-        loadData(activePair, config);
+    // Only reload data if it's MT5 and token changed, as other brokers don't provide history via this app
+    if (config.type === BrokerType.MT5 && config.accessToken) {
+        loadData(activePair, timeframe, config);
     }
   };
 
-  // Data Loading Logic
-  const loadData = async (pair: string, config: MetaApiConfig | null) => {
+  const refreshBrokerData = async () => {
+      if (!brokerConfig || brokerConfig.type !== BrokerType.MT5) return;
+      try {
+          const info = await fetchAccountInfo(brokerConfig);
+          setAccountInfo(info);
+          const pos = await fetchOpenPositions(brokerConfig);
+          setPositions(pos);
+      } catch (e) {
+          logger.warn("Failed to refresh broker data", e);
+      }
+  };
+
+  const loadData = async (pair: string, tf: string, config: BrokerConfig | null) => {
     setLoading(true);
     
-    if (config && config.accessToken && config.accountId) {
+    // Only attempt live data fetch if it's MT5
+    if (config && config.type === BrokerType.MT5 && config.accessToken && config.accountId) {
       try {
-        const liveData = await fetchMetaApiCandles(config, pair);
+        const timeoutPromise = new Promise<Candle[]>((_, reject) => 
+          setTimeout(() => reject(new Error("Timeout")), 8000)
+        );
+        
+        const dataPromise = fetchMetaApiCandles(config, pair, tf);
+        const liveData = await Promise.race([dataPromise, timeoutPromise]);
+
         if (liveData.length > 0) {
           setData(liveData);
           setUsingLiveData(true);
           setLoading(false);
           setLastUpdate(new Date());
+          refreshBrokerData(); 
           return;
         }
       } catch (err: any) {
         logger.warn("Failed to fetch live data, falling back to simulation");
-        if (usingLiveData) { 
-             notify('warning', 'Live Data Disconnected', 'Reverted to simulation mode due to connection error.');
-        }
       }
     }
 
-    const simData = generateMarketData(pair, 300);
+    const simData = generateMarketData(pair, 300, tf);
     setData(simData);
     setUsingLiveData(false);
     setLoading(false);
     setLastUpdate(new Date());
   };
 
-  // Initial Load & Pair Change
   useEffect(() => {
     if (auth.isAuthenticated) {
-      loadData(activePair, metaApiConfig);
+      loadData(activePair, timeframe, brokerConfig);
       lastTradeTime.current = 0;
       lastSignalType.current = null;
     }
-  }, [activePair, auth.isAuthenticated, metaApiConfig]);
+  }, [activePair, timeframe, auth.isAuthenticated, brokerConfig]);
 
-  // Simulate live ticks
+  useEffect(() => {
+      if (!usingLiveData || !brokerConfig) return;
+      const interval = setInterval(refreshBrokerData, 10000); 
+      return () => clearInterval(interval);
+  }, [usingLiveData, brokerConfig]);
+
   useEffect(() => {
     if (usingLiveData) return; 
 
     const interval = setInterval(() => {
       setData(prevData => {
         if (prevData.length === 0) return prevData;
-        
         const lastCandle = prevData[prevData.length - 1];
         const volatility = activePair.includes('JPY') ? 0.05 : 0.0005;
-        const newPrice = lastCandle.close + (Math.random() - 0.5) * volatility;
-        
+        const change = (Math.random() - 0.5) * volatility;
+        let newPrice = lastCandle.close + change;
+        const newHigh = Math.max(lastCandle.high, newPrice);
+        const newLow = Math.min(lastCandle.low, newPrice);
+
+        let intervalMs = 60 * 60 * 1000;
+        if (timeframe === '1m') intervalMs = 60 * 1000;
+        if (timeframe === '5m') intervalMs = 5 * 60 * 1000;
+        if (timeframe === '15m') intervalMs = 15 * 60 * 1000;
+        if (timeframe === '4h') intervalMs = 4 * 60 * 60 * 1000;
+        if (timeframe === '1d') intervalMs = 24 * 60 * 60 * 1000;
+
         const now = new Date();
-        if (now.getTime() - new Date(lastCandle.time).getTime() > 5000) {
+        const candleTime = new Date(lastCandle.time);
+        const shouldClose = now.getTime() - candleTime.getTime() > intervalMs;
+        setLastUpdate(now);
+
+        if (shouldClose) {
              const newCandle: Candle = {
-                 ...lastCandle,
                  time: now.toISOString(),
-                 open: lastCandle.close,
+                 open: newPrice,
                  close: newPrice,
-                 high: Math.max(lastCandle.close, newPrice),
-                 low: Math.min(lastCandle.close, newPrice),
+                 high: newPrice,
+                 low: newPrice,
+                 volume: 0,
                  ma50: lastCandle.ma50, 
                  ma200: lastCandle.ma200,
                  rsi: lastCandle.rsi
              };
-             setLastUpdate(now);
-             return [...prevData.slice(1), newCandle];
+             const newData = [...prevData, newCandle];
+             if (newData.length > 300) newData.shift();
+             return newData;
+        } else {
+             const updatedCandle = { ...lastCandle, close: newPrice, high: newHigh, low: newLow };
+             return [...prevData.slice(0, -1), updatedCandle];
         }
-        return prevData;
       });
     }, 1000);
-
     return () => clearInterval(interval);
-  }, [activePair, usingLiveData]);
+  }, [activePair, usingLiveData, timeframe]);
 
-  // Memoize analysis
   const currentAnalysis: MarketAnalysis | null = useMemo(() => {
     if (data.length < 2) return null;
     const current = data[data.length - 1];
@@ -208,14 +268,24 @@ const App: React.FC = () => {
 
   // --- AUTO TRADING LOGIC ---
   useEffect(() => {
-    if (!isAutoTrading || !currentAnalysis || !metaApiConfig) return;
+    if (!isAutoTrading || !currentAnalysis || !brokerConfig) return;
 
-    const now = Date.now();
+    const now = new Date();
+    const currentHour = now.getHours();
+    
+    if (currentHour < autoTradeConfig.tradingStartHour || currentHour >= autoTradeConfig.tradingEndHour) return;
+
+    const nowMs = now.getTime();
     const COOLDOWN_MS = 5 * 60 * 1000; 
-    if (now - lastTradeTime.current < COOLDOWN_MS) return;
+    if (nowMs - lastTradeTime.current < COOLDOWN_MS) return;
     if (currentAnalysis.confidence <= 70) return;
     if (currentAnalysis.signal === SignalType.HOLD) return;
-    if (currentAnalysis.signal === lastSignalType.current) return;
+    
+    // For MT5, avoid duplicate positions
+    if (brokerConfig.type === BrokerType.MT5) {
+        const hasOpenPosition = positions.some(p => p.symbol.includes(activePair.replace('/', '')) || activePair.includes(p.symbol));
+        if (hasOpenPosition) return;
+    }
 
     const executeAutoTrade = async () => {
       const isBuy = currentAnalysis.signal === SignalType.BUY;
@@ -238,22 +308,22 @@ const App: React.FC = () => {
       };
 
       logger.info("Attempting Auto-Trade", order);
-      notify('info', 'Auto-Trading', `Executing ${order.actionType} on ${activePair}...`);
-
+      
       try {
-        await executeMetaApiTrade(metaApiConfig, order);
-        notify('success', 'Auto-Trade Executed', `${isBuy ? 'BUY' : 'SELL'} ${autoTradeConfig.lotSize} lots @ ${price.toFixed(5)}`);
-        lastTradeTime.current = now;
+        await executeBrokerTrade(brokerConfig, order);
+        notify('success', 'Bot Trade Executed', `${order.actionType} on ${activePair}`);
+        lastTradeTime.current = nowMs;
         lastSignalType.current = currentAnalysis.signal;
+        refreshBrokerData(); 
       } catch (err: any) {
         logger.error("Auto-Trade Failed", err);
-        notify('error', 'Auto-Trade Error', err.message || 'Execution failed');
+        notify('error', 'Bot Execution Failed', err.message);
       }
     };
 
     executeAutoTrade();
 
-  }, [currentAnalysis, isAutoTrading, metaApiConfig, autoTradeConfig, activePair]);
+  }, [currentAnalysis, isAutoTrading, brokerConfig, autoTradeConfig, activePair, positions]);
 
 
   if (!auth.isAuthenticated) {
@@ -261,7 +331,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-200 font-sans">
+    <div className="min-h-screen bg-[#09090b] text-[#fafafa] font-sans pb-10 selection:bg-blue-900/30">
       
       <ToastContainer toasts={toasts} onRemove={removeToast} />
 
@@ -269,96 +339,72 @@ const App: React.FC = () => {
         isOpen={showSettings} 
         onClose={() => setShowSettings(false)} 
         onSave={handleSaveSettings}
-        currentConfig={metaApiConfig}
+        currentConfig={brokerConfig}
         currentAppSettings={appSettings}
       />
 
-      {/* Floating Navbar */}
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-[#020617]/80 backdrop-blur-xl">
+      {/* Header */}
+      <header className="sticky top-0 z-50 w-full bg-[#09090b]/90 backdrop-blur-md border-b border-[#27272a]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
-            
-            {/* Brand */}
             <div className="flex items-center gap-3">
-              <div className="relative group cursor-pointer">
-                <div className="absolute -inset-1 bg-indigo-500 rounded-full blur opacity-20 group-hover:opacity-40 transition duration-200" />
-                <div className="relative p-2 bg-[#0B0F19] rounded-xl border border-white/10">
-                  <Activity className="text-indigo-400" size={20} />
-                </div>
+              <div className="p-2 bg-blue-600 rounded text-white">
+                <Activity size={20} />
               </div>
-              <div>
-                <h1 className="font-bold text-white text-base tracking-tight leading-none flex items-center gap-1">
-                  {appSettings.appName} <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-[9px] text-indigo-400 font-mono">PRO</span>
+              <div className="flex flex-col justify-center">
+                <h1 className="font-bold text-base tracking-tight leading-none text-white">
+                  {appSettings.appName}
                 </h1>
+                {appSettings.beginnerMode && (
+                  <span className="text-[10px] text-[#a1a1aa] font-medium mt-0.5 flex items-center gap-1">
+                    Simple View
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Center - Pair Selector & Tabs */}
-            <div className="hidden md:flex items-center gap-4 bg-[#0B0F19] p-1.5 rounded-full border border-white/5">
-               {/* Pair Selector */}
-               <div className="relative group px-2">
+            <div className="flex items-center gap-4">
+               <div className="hidden md:block relative">
                 <select 
                   value={activePair}
                   onChange={(e) => setActivePair(e.target.value)}
-                  className="appearance-none bg-transparent text-white text-xs font-bold pr-6 cursor-pointer focus:outline-none"
+                  className="appearance-none bg-[#18181b] border border-[#27272a] text-white text-sm rounded-md py-1.5 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-600/50 transition-all"
                 >
-                  {AVAILABLE_PAIRS.map(p => <option key={p} value={p} className="bg-slate-900">{p}</option>)}
+                  {AVAILABLE_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
-                <ChevronDown className="absolute right-0 top-1/2 transform -translate-y-1/2 text-slate-500 pointer-events-none" size={12} />
+                <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 text-[#71717a] pointer-events-none" size={14} />
               </div>
 
-              <div className="w-px h-4 bg-white/10 mx-1"></div>
+              <div className="h-6 w-px bg-[#27272a] hidden md:block"></div>
 
-              <button 
-                  onClick={() => setActiveTab(Tab.DASHBOARD)}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
-                    activeTab === Tab.DASHBOARD 
-                      ? 'bg-slate-800 text-white shadow-inner' 
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <LayoutDashboard size={12} /> Terminal
-                </button>
-                <button 
-                  onClick={() => setActiveTab(Tab.BACKTEST)}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
-                    activeTab === Tab.BACKTEST 
-                      ? 'bg-slate-800 text-white shadow-inner' 
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <LineChart size={12} /> Backtest
-                </button>
-            </div>
-
-            {/* Right - Actions */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1 pl-4">
-                <button 
+              <div className="flex items-center gap-2">
+                <button
                   onClick={() => {
-                      loadData(activePair, metaApiConfig);
-                      notify('info', 'Refreshing Data', 'Fetching latest candles...');
+                    const newMode = !appSettings.beginnerMode;
+                    setAppSettings({...appSettings, beginnerMode: newMode});
+                    localStorage.setItem('app_settings', JSON.stringify({...appSettings, beginnerMode: newMode}));
                   }}
-                  className="p-2 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 transition-all"
-                  title="Refresh Data"
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                    appSettings.beginnerMode 
+                    ? 'bg-[#18181b] text-white border border-[#27272a]' 
+                    : 'text-[#71717a] hover:text-white'
+                  }`}
                 >
-                  <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                  {appSettings.beginnerMode ? 'Beginner' : 'Pro'}
                 </button>
-                
+
                 <button
                   onClick={() => setShowSettings(true)}
-                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all"
-                  title="Settings"
+                  className="p-2 rounded text-[#71717a] hover:text-white hover:bg-[#18181b] transition-colors"
                 >
-                  <Settings size={18} />
+                  <Settings size={20} />
                 </button>
 
                 <button
                   onClick={handleLogout}
-                  className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                  title="Logout"
+                  className="p-2 rounded text-[#71717a] hover:text-white hover:bg-[#18181b] transition-colors"
                 >
-                  <LogOut size={18} />
+                  <LogOut size={20} />
                 </button>
               </div>
             </div>
@@ -366,107 +412,139 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        
-        {/* Mobile Navigation */}
-        <div className="md:hidden grid grid-cols-2 gap-2 p-1 bg-[#0B0F19] rounded-xl border border-white/5">
-           <button 
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 mb-6">
+        <div className="flex border-b border-[#27272a] gap-8">
+          <button 
               onClick={() => setActiveTab(Tab.DASHBOARD)}
-              className={`flex items-center justify-center gap-2 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
-                activeTab === Tab.DASHBOARD ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-slate-400'
+              className={`pb-3 text-sm font-medium transition-all border-b-2 ${
+                activeTab === Tab.DASHBOARD 
+                  ? 'border-blue-600 text-white' 
+                  : 'border-transparent text-[#a1a1aa] hover:text-white'
               }`}
             >
-              <LayoutDashboard size={14} /> Terminal
+              Market Dashboard
             </button>
             <button 
               onClick={() => setActiveTab(Tab.BACKTEST)}
-              className={`flex items-center justify-center gap-2 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
-                activeTab === Tab.BACKTEST ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-slate-400'
+              className={`pb-3 text-sm font-medium transition-all border-b-2 ${
+                activeTab === Tab.BACKTEST 
+                  ? 'border-blue-600 text-white' 
+                  : 'border-transparent text-[#a1a1aa] hover:text-white'
               }`}
             >
-              <LineChart size={14} /> Backtest
+              Strategy Tester
             </button>
+        </div>
+      </div>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Mobile Pair Selector */}
+        <div className="md:hidden mb-6">
+          <select 
+            value={activePair}
+            onChange={(e) => setActivePair(e.target.value)}
+            className="w-full bg-[#18181b] border border-[#27272a] text-white text-sm rounded-lg py-3 px-4 focus:outline-none focus:border-blue-600"
+          >
+            {AVAILABLE_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
         </div>
 
         {loading && (
-          <div className="flex flex-col items-center justify-center h-[60vh]">
-             <div className="relative">
-               <div className="absolute -inset-10 bg-indigo-500/10 rounded-full blur-3xl animate-pulse" />
-               <RefreshCw className="relative animate-spin text-indigo-500" size={48} />
-             </div>
-             <p className="mt-8 text-indigo-200 text-xs font-bold tracking-[0.2em] animate-pulse">ESTABLISHING FEED...</p>
+          <div className="flex flex-col items-center justify-center h-[40vh]">
+             <div className="w-8 h-8 border-2 border-[#27272a] border-t-blue-600 rounded-full animate-spin mb-4"></div>
+             <h2 className="text-[#a1a1aa] text-sm">Loading Market Data...</h2>
           </div>
         )}
 
         {!loading && currentAnalysis && (
           <>
-             {/* Render Dashboard */}
              {activeTab === Tab.DASHBOARD && (
-               <div className="space-y-6 animate-in fade-in duration-500 slide-in-from-bottom-4">
+               <div className="space-y-8 animate-in fade-in duration-300">
                  
-                 <SignalPanel analysis={currentAnalysis} />
+                 <SignalPanel analysis={currentAnalysis} beginnerMode={appSettings.beginnerMode} />
 
-                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                   {/* Main Chart Area */}
-                   <div className="lg:col-span-8 flex flex-col gap-6">
-                     <div className="bg-[#0B0F19]/70 backdrop-blur-xl border border-white/5 rounded-2xl shadow-2xl overflow-hidden relative group">
-                        {/* Decorative top bar */}
-                       <div className="flex justify-between items-center px-5 py-3 border-b border-white/5 bg-white/[0.02]">
-                         <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em] flex items-center gap-2">
-                           <Sparkles size={12} className="text-indigo-400" /> Technical Overview
+                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                   <div className="lg:col-span-2 space-y-8">
+                     <div className="bg-[#18181b] border border-[#27272a] rounded-xl overflow-hidden">
+                       <div className="p-5 border-b border-[#27272a] flex justify-between items-center">
+                         <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                           Price Action
                          </h3>
-                         <div className="flex gap-4 text-[9px] font-mono uppercase tracking-wider text-slate-500">
-                            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_#3b82f6]"></div> MA 50</span>
-                            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-500 shadow-[0_0_5px_#a855f7]"></div> MA 200</span>
-                         </div>
+                         {usingLiveData && (
+                           <div className="flex items-center gap-1.5">
+                             <span className="relative flex h-2 w-2">
+                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                               <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                             </span>
+                             <span className="text-xs text-[#a1a1aa]">Live</span>
+                           </div>
+                         )}
                        </div>
-                       <div className="p-1 relative min-h-[450px]">
-                         <ForexChart data={data} pair={activePair} />
+                       <div className="p-5">
+                         <ForexChart 
+                           data={data} 
+                           pair={activePair} 
+                           timeframe={timeframe} 
+                           onTimeframeChange={setTimeframe}
+                         />
                        </div>
                      </div>
+
+                     <AIAnalyst 
+                        analysis={currentAnalysis} 
+                        notify={notify} 
+                        apiKey={appSettings.geminiApiKey}
+                     />
                    </div>
 
-                   {/* Side Panel */}
-                   <div className="lg:col-span-4 space-y-6">
-                      <TradePanel 
+                   <div className="lg:col-span-1 space-y-8">
+                     <TradePanel 
                         activePair={activePair} 
                         currentPrice={currentAnalysis.currentPrice}
-                        metaApiConfig={metaApiConfig}
+                        brokerConfig={brokerConfig}
                         onAutoTradeToggle={setIsAutoTrading}
                         isAutoTrading={isAutoTrading}
                         notify={notify}
                         autoTradeConfig={autoTradeConfig}
                         onUpdateAutoConfig={setAutoTradeConfig}
-                      />
+                        beginnerMode={appSettings.beginnerMode}
+                        accountInfo={accountInfo}
+                        positions={positions}
+                        onRefreshBrokerData={refreshBrokerData}
+                     />
 
-                      <AIAnalyst analysis={currentAnalysis} notify={notify} />
-
-                      <div className="bg-[#0B0F19]/50 backdrop-blur-md border border-white/5 rounded-2xl p-5">
-                        <h3 className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mb-4">Connection Status</h3>
-                        <div className="space-y-2">
-                           <div className="flex justify-between items-center p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                              <span className="text-xs text-slate-400">Data Feed</span>
-                              <div className="flex items-center gap-2">
-                                <div className={`w-1.5 h-1.5 rounded-full ${usingLiveData ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                                <span className="text-xs font-bold text-slate-200">
-                                    {usingLiveData ? 'MetaAPI Live' : 'Simulation'}
-                                </span>
-                              </div>
+                     {appSettings.beginnerMode && (
+                       <div className="bg-[#18181b] border border-[#27272a] rounded-xl p-5">
+                         <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                           <Info size={16} className="text-blue-500" />
+                           Quick Guide
+                         </h4>
+                         <div className="space-y-4 text-sm text-[#a1a1aa]">
+                           <div className="flex items-start gap-3">
+                             <div className="w-1.5 h-1.5 rounded-full bg-green-500 mt-2 shrink-0"></div>
+                             <p><strong>Buy Signal:</strong> Indicates price is likely to rise. Good for entering a "Long" position.</p>
                            </div>
-                           <div className="flex justify-between items-center p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                              <span className="text-xs text-slate-400">Last Update</span>
-                              <span className="text-xs text-indigo-300 font-mono">{lastUpdate.toLocaleTimeString()}</span>
+                           <div className="flex items-start gap-3">
+                             <div className="w-1.5 h-1.5 rounded-full bg-red-500 mt-2 shrink-0"></div>
+                             <p><strong>Sell Signal:</strong> Indicates price is likely to fall. Good for entering a "Short" position.</p>
                            </div>
-                        </div>
-                      </div>
+                         </div>
+                       </div>
+                     )}
                    </div>
                  </div>
                </div>
              )}
 
-             {/* Render Backtest */}
              {activeTab === Tab.BACKTEST && (
-               <BacktestPanel data={data} />
+               <div className="bg-[#18181b] border border-[#27272a] rounded-xl p-6">
+                 <div className="mb-6 border-b border-[#27272a] pb-4">
+                   <h2 className="text-lg font-bold text-white mb-1">Strategy Backtest</h2>
+                   <p className="text-[#a1a1aa] text-sm">Simulate performance on historical data.</p>
+                 </div>
+                 <BacktestPanel data={data} />
+               </div>
              )}
           </>
         )}

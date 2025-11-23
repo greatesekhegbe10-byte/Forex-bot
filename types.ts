@@ -73,15 +73,29 @@ export interface AuthState {
   user: User | null;
 }
 
-export interface MetaApiConfig {
-  accountId: string;
-  accessToken: string;
-  region: string; // e.g., 'new-york', 'london'
+export enum BrokerType {
+  MT5 = 'MT5',
+  IQ_OPTION = 'IQ_OPTION',
+  POCKET_OPTION = 'POCKET_OPTION',
+  CUSTOM_WEBHOOK = 'CUSTOM_WEBHOOK'
+}
+
+export interface BrokerConfig {
+  type: BrokerType;
+  // MT5 Specifics
+  accountId?: string;
+  accessToken?: string;
+  region?: string; 
+  // Other Brokers (Webhook/Bridge)
+  webhookUrl?: string;
+  apiKey?: string;
 }
 
 export interface AppSettings {
   appName: string;
   domainUrl: string;
+  beginnerMode: boolean;
+  geminiApiKey?: string;
 }
 
 export interface TradeOrder {
@@ -106,4 +120,29 @@ export interface AutoTradeConfig {
   stopLossPips: number;
   takeProfitPips: number;
   maxSpreadPips: number;
+  maxDailyLoss: number;
+  tradingStartHour: number; // 0-23
+  tradingEndHour: number;   // 0-23
+}
+
+export interface MetaAccountInfo {
+  balance: number;
+  equity: number;
+  margin: number;
+  freeMargin: number;
+  currency: string;
+  leverage: number;
+}
+
+export interface MetaPosition {
+  id: string;
+  symbol: string;
+  type: 'POSITION_TYPE_BUY' | 'POSITION_TYPE_SELL';
+  volume: number;
+  openPrice: number;
+  currentPrice: number;
+  profit: number;
+  swap: number;
+  commission: number;
+  time: string;
 }

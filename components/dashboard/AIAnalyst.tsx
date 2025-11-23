@@ -8,9 +8,10 @@ import { ToastType } from '../ui/Toast';
 interface AIAnalystProps {
   analysis: MarketAnalysis;
   notify: (type: ToastType, title: string, message: string) => void;
+  apiKey?: string;
 }
 
-export const AIAnalyst: React.FC<AIAnalystProps> = ({ analysis, notify }) => {
+export const AIAnalyst: React.FC<AIAnalystProps> = ({ analysis, notify, apiKey }) => {
   const [insight, setInsight] = useState<GeminiAnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,92 +20,83 @@ export const AIAnalyst: React.FC<AIAnalystProps> = ({ analysis, notify }) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await generateMarketInsight(analysis);
+      const result = await generateMarketInsight(analysis, apiKey);
       setInsight(result);
       notify('success', 'Analysis Complete', 'AI insights generated successfully.');
     } catch (err: any) {
-      const msg = "AI Analysis currently unavailable.";
+      const msg = err.message || "AI Analysis unavailable.";
       setError(msg);
-      notify('error', 'Analysis Failed', err.message || msg);
+      notify('error', 'Analysis Failed', msg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="bg-gradient-to-br from-indigo-900/50 to-slate-800 border border-indigo-500/30 rounded-xl p-6 relative overflow-hidden">
-      <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
-        <Bot size={100} />
-      </div>
-
+    <div className="bg-slate-800 border border-slate-700 rounded-lg p-5 shadow-sm">
       <div className="flex items-center gap-3 mb-4">
-        <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
-          <Sparkles size={24} />
+        <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+          <Bot size={20} />
         </div>
-        <h3 className="text-lg font-bold text-white">Gemini AI Analyst</h3>
+        <h3 className="text-base font-bold text-white">Gemini AI Analyst</h3>
       </div>
 
       {!insight && !loading && !error && (
-        <div className="text-center py-6">
+        <div className="text-center py-6 border-t border-slate-700/50 mt-2">
           <p className="text-slate-400 mb-4 text-sm">
-            Generate professional insights based on current technicals:<br/>
-            <span className="text-indigo-400">RSI: {analysis.rsi.toFixed(1)} • Trend: {analysis.trend}</span>
+            Generate professional insights based on current market data.<br/>
           </p>
           <button
             onClick={handleAnalyze}
-            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors flex items-center gap-2 mx-auto shadow-lg shadow-indigo-500/20"
+            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-semibold transition-colors flex items-center gap-2 mx-auto"
           >
-            <Bot size={18} />
-            Analyze Market
+            <Sparkles size={16} />
+            Generate Report
           </button>
         </div>
       )}
 
       {loading && (
-        <div className="flex flex-col items-center justify-center py-10 text-indigo-300">
-          <Loader2 className="animate-spin mb-3" size={32} />
-          <p className="text-sm font-medium animate-pulse">Analyzing market structure...</p>
+        <div className="flex flex-col items-center justify-center py-8 text-indigo-400">
+          <Loader2 className="animate-spin mb-2" size={24} />
+          <p className="text-sm">Analyzing market structure...</p>
         </div>
       )}
 
       {error && (
-        <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4 text-red-200 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-             <AlertTriangle size={20} />
-             <span className="font-bold">Analysis Failed</span>
+        <div className="bg-red-900/20 border border-red-900/50 rounded p-3 text-red-200 text-center">
+          <div className="flex items-center justify-center gap-2 mb-1">
+             <AlertTriangle size={16} />
+             <span className="font-bold text-sm">Error</span>
           </div>
           <p className="text-xs opacity-80 mb-3">{error}</p>
           <button 
             onClick={handleAnalyze}
-            className="text-xs bg-red-900/40 hover:bg-red-900/60 px-3 py-1 rounded border border-red-500/30 transition-colors"
+            className="text-xs bg-red-800/30 hover:bg-red-800/50 px-3 py-1 rounded border border-red-800/30 transition-colors"
           >
-            Try Again
+            Retry
           </button>
         </div>
       )}
 
       {insight && !loading && (
-        <div className="space-y-4 animate-in fade-in duration-500">
-          <div className="flex justify-between items-start">
+        <div className="space-y-4 animate-in fade-in duration-300">
+          <div className="flex justify-between items-start border-b border-slate-700 pb-3">
              <div>
-                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-xs rounded-full font-bold mb-2 border ${
-                  insight.sentiment === 'Bullish' ? 'bg-green-900/30 border-green-500/50 text-green-400' :
-                  insight.sentiment === 'Bearish' ? 'bg-red-900/30 border-red-500/50 text-red-400' : 
-                  'bg-slate-700/30 border-slate-500/50 text-slate-300'
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded font-bold mb-2 ${
+                  insight.sentiment === 'Bullish' ? 'bg-green-900/30 text-green-400' :
+                  insight.sentiment === 'Bearish' ? 'bg-red-900/30 text-red-400' : 
+                  'bg-slate-700 text-slate-300'
                 }`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${
-                     insight.sentiment === 'Bullish' ? 'bg-green-400' :
-                     insight.sentiment === 'Bearish' ? 'bg-red-400' : 'bg-slate-400'
-                  }`}></div>
                   {insight.sentiment.toUpperCase()}
                 </span>
-                <p className="text-slate-200 text-sm leading-relaxed font-medium">{insight.summary}</p>
+                <p className="text-slate-300 text-sm leading-relaxed">{insight.summary}</p>
              </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3">
-            <div className="bg-slate-900/60 p-3 rounded border border-slate-700/50">
-              <h4 className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider mb-2">Key Levels</h4>
+            <div className="bg-slate-900/50 p-3 rounded border border-slate-700">
+              <h4 className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Key Levels</h4>
               <div className="flex flex-wrap gap-2">
                 {insight.keyLevels.map((level, i) => (
                   <span key={i} className="text-xs bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700">
@@ -113,15 +105,15 @@ export const AIAnalyst: React.FC<AIAnalystProps> = ({ analysis, notify }) => {
                 ))}
               </div>
             </div>
-            <div className="bg-indigo-900/20 p-3 rounded border border-indigo-500/20">
-              <h4 className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider mb-1">Actionable Advice</h4>
-              <p className="text-sm text-indigo-100 italic">"{insight.actionableAdvice}"</p>
+            <div className="bg-indigo-900/10 p-3 rounded border border-indigo-900/30">
+              <h4 className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider mb-1">Recommendation</h4>
+              <p className="text-sm text-indigo-200 italic">"{insight.actionableAdvice}"</p>
             </div>
           </div>
           
           <button 
             onClick={handleAnalyze}
-            className="w-full flex items-center justify-center gap-2 py-2 mt-2 text-xs text-slate-400 hover:text-indigo-300 hover:bg-slate-800/50 rounded transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-2 mt-2 text-xs text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
           >
             <RefreshCw size={12} /> Refresh Analysis
           </button>
