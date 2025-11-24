@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Server, ShieldCheck, Globe, Layout, Key, Box } from 'lucide-react';
+import { X, Server, ShieldCheck, Globe, Layout, Key, Box, AlertTriangle } from 'lucide-react';
 import { BrokerConfig, AppSettings, BrokerType } from '../../types';
 
 interface SettingsModalProps {
@@ -25,6 +25,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [accountId, setAccountId] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [region, setRegion] = useState('new-york');
+  const [customRegion, setCustomRegion] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
 
@@ -39,6 +40,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setAccountId(currentConfig.accountId || '');
       setAccessToken(currentConfig.accessToken || '');
       setRegion(currentConfig.region || 'new-york');
+      // If region is not in standard list, set it as custom
+      const standardRegions = ['new-york', 'london', 'frankfurt', 'singapore', 'tokyo', 'mumbai', 'hong-kong', 'sao-paulo', 'johannesburg', 'bahrain'];
+      if (currentConfig.region && !standardRegions.includes(currentConfig.region)) {
+         setRegion('custom');
+         setCustomRegion(currentConfig.region);
+      }
       setWebhookUrl(currentConfig.webhookUrl || '');
       setApiKey(currentConfig.apiKey || '');
     }
@@ -53,8 +60,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const finalRegion = region === 'custom' ? customRegion : region;
+    
     onSave(
-      { type: brokerType, accountId, accessToken, region, webhookUrl, apiKey },
+      { type: brokerType, accountId, accessToken, region: finalRegion, webhookUrl, apiKey },
       { 
         appName, 
         domainUrl,
@@ -130,15 +139,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               <div className="pt-4 border-t border-slate-800 space-y-2">
                 <h3 className="text-xs font-bold text-white uppercase mb-2 flex items-center gap-2">
-                  <Key size={12} /> AI Configuration
+                  <Key size={12} /> AI & Security
                 </h3>
+                <div className="bg-slate-800/50 p-3 rounded border border-slate-700 mb-2">
+                    <p className="text-[10px] text-slate-400 leading-relaxed flex gap-2">
+                        <ShieldCheck size={14} className="shrink-0 text-green-500" />
+                        API Keys are stored locally on your device in an encrypted format. They are never transmitted to our servers.
+                    </p>
+                </div>
+                <label className="text-xs text-slate-400 font-semibold uppercase">Gemini API Key</label>
                 <input
                   type="password"
                   value={geminiApiKey}
                   onChange={(e) => setGeminiApiKey(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  placeholder="AI Studio API Key"
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+                  placeholder="AI Studio API Key (Starts with AIza...)"
                 />
+                <p className="text-[10px] text-slate-500">
+                  Required for AI Analyst to work on this device.
+                </p>
               </div>
             </div>
           )}
@@ -164,7 +183,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {brokerType === BrokerType.MT5 ? (
                 <div className="space-y-4 pt-2 animate-in fade-in">
                   <div className="bg-blue-900/20 border border-blue-800/50 rounded p-3 text-xs text-blue-200">
-                    Connects directly via MetaAPI cloud.
+                    Connects directly via MetaAPI cloud. Support for all global regions.
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs text-slate-400 font-semibold uppercase">Access Token</label>
@@ -172,7 +191,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       type="password"
                       value={accessToken}
                       onChange={(e) => setAccessToken(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                      className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
                       placeholder="token_..."
                     />
                   </div>
@@ -182,22 +201,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       type="text"
                       value={accountId}
                       onChange={(e) => setAccountId(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                      className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs text-slate-400 font-semibold uppercase">Region</label>
+                    <label className="text-xs text-slate-400 font-semibold uppercase">Server Region</label>
                     <select
                       value={region}
                       onChange={(e) => setRegion(e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                     >
-                      <option value="new-york">New York</option>
-                      <option value="london">London</option>
-                      <option value="singapore">Singapore</option>
-                      <option value="tokyo">Tokyo</option>
+                      <option value="new-york">New York (North America)</option>
+                      <option value="london">London (Europe)</option>
+                      <option value="frankfurt">Frankfurt (Europe)</option>
+                      <option value="singapore">Singapore (Asia)</option>
+                      <option value="tokyo">Tokyo (Asia)</option>
+                      <option value="mumbai">Mumbai (India)</option>
+                      <option value="hong-kong">Hong Kong (Asia)</option>
+                      <option value="sao-paulo">Sao Paulo (South America)</option>
+                      <option value="johannesburg">Johannesburg (Africa)</option>
+                      <option value="bahrain">Bahrain (Middle East)</option>
+                      <option value="custom">Custom / Other</option>
                     </select>
                   </div>
+                  
+                  {region === 'custom' && (
+                    <div className="space-y-1 animate-in slide-in-from-top-2">
+                       <label className="text-xs text-slate-400 font-semibold uppercase">Custom Region Slug</label>
+                       <input
+                          type="text"
+                          value={customRegion}
+                          onChange={(e) => setCustomRegion(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                          placeholder="e.g. toronto"
+                        />
+                        <p className="text-[10px] text-yellow-500 flex items-center gap-1">
+                          <AlertTriangle size={10} />
+                          Ensure this matches the MetaAPI URL region code exactly.
+                        </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4 pt-2 animate-in fade-in">

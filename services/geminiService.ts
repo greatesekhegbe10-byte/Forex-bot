@@ -4,13 +4,15 @@ import { MarketAnalysis, GeminiAnalysisResult } from '../types';
 import { logger } from './logger';
 
 export const generateMarketInsight = async (analysis: MarketAnalysis, apiKeyOverride?: string): Promise<GeminiAnalysisResult> => {
-  // Priority: Manual Key (Settings) -> Environment Variable (Build)
+  // CRITICAL: Priority Order for Cross-Device Compatibility
+  // 1. Manually entered key in Settings (apiKeyOverride)
+  // 2. Environment variable (process.env.API_KEY) - fallback for local dev
   const apiKey = apiKeyOverride || process.env.API_KEY;
 
   if (!apiKey) {
-    const msg = "Gemini API Key is missing. Please go to Settings > General and enter your API Key.";
+    const msg = "Gemini API Key is missing. If you are on a new device, please go to Settings > General and enter your AI Studio API Key manually.";
     logger.error(msg);
-    throw new Error(msg);
+    throw new Error("Missing API Key. Check Settings.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -81,7 +83,7 @@ export const generateMarketInsight = async (analysis: MarketAnalysis, apiKeyOver
     logger.error("Gemini API Failed", errorMessage);
     
     if (errorMessage.includes('401') || errorMessage.includes('key') || errorMessage.includes('PERMISSION_DENIED')) {
-        throw new Error("Invalid API Key. Check Settings.");
+        throw new Error("Invalid API Key. Please update it in Settings > General.");
     }
     
     throw new Error(errorMessage);
