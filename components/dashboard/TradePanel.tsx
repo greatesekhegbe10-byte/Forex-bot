@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Zap, Clipboard, Bell, ArrowRightLeft, Briefcase, Wallet, Trash2, XCircle, AlertTriangle } from 'lucide-react';
+import { Zap, Clipboard, Bell, ArrowRightLeft, Briefcase, Wallet, Trash2, XCircle, AlertTriangle, Lock, RefreshCw } from 'lucide-react';
 import { BrokerConfig, TradeOrder, AutoTradeConfig, MetaAccountInfo, MetaPosition } from '../../types';
 import { parseSignalText, executeBrokerTrade, closeMetaApiPosition } from '../../services/forexService';
 import { ToastType } from '../ui/Toast';
@@ -18,6 +18,7 @@ interface TradePanelProps {
   accountInfo: MetaAccountInfo | null;
   positions: MetaPosition[];
   onRefreshBrokerData: () => void;
+  isPro: boolean;
 }
 
 interface PriceAlert {
@@ -39,7 +40,8 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   beginnerMode,
   accountInfo,
   positions,
-  onRefreshBrokerData
+  onRefreshBrokerData,
+  isPro
 }) => {
   const [tab, setTab] = useState<'manual' | 'portfolio' | 'parser' | 'auto' | 'alerts'>('manual');
   
@@ -51,16 +53,15 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   const [priceAlerts, setPriceAlerts] = useState<PriceAlert[]>([]);
   const [alertTarget, setAlertTarget] = useState<string>('');
 
-  // Fix: Only reset SL/TP when the PAIR changes, not every time price ticks.
   useEffect(() => {
     const pip = activePair.includes('JPY') ? 0.01 : 0.0001;
-    // We use a safe default relative to an approximate price or 0 if price isn't ready
     const basePrice = currentPrice || (activePair.includes('JPY') ? 145.00 : 1.1000);
     
-    setStopLoss((basePrice - 50 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
-    setTakeProfit((basePrice + 100 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
-    setAlertTarget(basePrice.toFixed(activePair.includes('JPY') ? 2 : 4));
-  }, [activePair]); // Removed currentPrice from dependencies to prevent input fighting
+    // Only set default if empty to allow typing
+    if(!stopLoss) setStopLoss((basePrice - 50 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
+    if(!takeProfit) setTakeProfit((basePrice + 100 * pip).toFixed(activePair.includes('JPY') ? 2 : 4));
+    if(!alertTarget) setAlertTarget(basePrice.toFixed(activePair.includes('JPY') ? 2 : 4));
+  }, [activePair]); 
 
   // Monitor Price Alerts
   useEffect(() => {
@@ -124,13 +125,16 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   };
 
   const handleParseSignal = () => {
+    if (!isPro) {
+        notify('warning', 'Pro Feature', 'Upgrade to access Signal Parser');
+        return;
+    }
     const signal = parseSignalText(pasteText);
     if (!signal.symbol && !signal.type) {
         notify('warning', 'Parse Error', 'Could not find symbol or direction.');
         return;
     }
     if (signal.symbol) {
-       // Note: In a real app we might switch activePair here, but for now we just notify
        notify('info', 'Signal Pair', `Detected signal for ${signal.symbol}`);
     }
     if (signal.sl) setStopLoss(signal.sl.toString());
@@ -144,6 +148,10 @@ export const TradePanel: React.FC<TradePanelProps> = ({
   };
 
   const handleSetAlert = () => {
+    if (!isPro) {
+        notify('warning', 'Pro Feature', 'Upgrade to access Price Alerts');
+        return;
+    }
     const target = parseFloat(alertTarget);
     if (!target || isNaN(target)) {
       notify('warning', 'Invalid Price', 'Please enter a valid target price.');
@@ -187,19 +195,20 @@ export const TradePanel: React.FC<TradePanelProps> = ({
         {[
           { id: 'manual', label: 'Trade', icon: ArrowRightLeft },
           { id: 'portfolio', label: 'Positions', icon: Briefcase },
-          { id: 'parser', label: 'Parser', icon: Clipboard },
-          { id: 'auto', label: 'Auto', icon: Zap },
-          { id: 'alerts', label: 'Alerts', icon: Bell }
+          { id: 'parser', label: 'Parser', icon: Clipboard, locked: !isPro },
+          { id: 'auto', label: 'Auto', icon: Zap, locked: !isPro },
+          { id: 'alerts', label: 'Alerts', icon: Bell, locked: !isPro }
         ].map((item) => (
           <button 
             key={item.id}
             onClick={() => setTab(item.id as any)}
-            className={`flex-1 py-3 text-xs font-medium flex flex-col items-center gap-1.5 ${
+            className={`flex-1 py-3 text-xs font-medium flex flex-col items-center gap-1.5 relative ${
               tab === item.id 
                 ? 'text-blue-500 bg-[#27272a]' 
                 : 'text-[#a1a1aa] hover:text-white hover:bg-[#27272a]/50'
             }`}
           >
+            {item.locked && <Lock size={10} className="absolute top-1 right-2 text-yellow-500" />}
             <item.icon size={16} />
             <span className="hidden sm:inline">{item.label}</span>
           </button>
@@ -330,149 +339,127 @@ export const TradePanel: React.FC<TradePanelProps> = ({
             </div>
         )}
 
-        {tab === 'parser' && (
-          <div className="space-y-4">
-            <textarea 
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-              placeholder="Paste signal text here...&#10;e.g. BUY EURUSD @ 1.1050 SL 1.1000 TP 1.1200"
-              className="w-full h-32 bg-[#09090b] border border-[#27272a] rounded-lg p-3 text-white text-xs resize-none focus:border-blue-600 outline-none"
-            />
-            <button
-              onClick={handleParseSignal}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg text-sm transition-colors"
-            >
-              Parse & Apply
-            </button>
-            <p className="text-[10px] text-[#71717a]">
-              This will automatically extract Symbol, Direction, SL and TP from telegram-style messages.
-            </p>
-          </div>
-        )}
-
-        {tab === 'auto' && (
-          <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2">
-            <div className="flex items-center justify-between bg-[#27272a] p-3 rounded-lg">
-              <span className="text-sm font-bold text-white">Master Switch</span>
-              <button 
-                onClick={() => onAutoTradeToggle(!isAutoTrading)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  isAutoTrading ? 'bg-green-500' : 'bg-[#3f3f46]'
-                }`}
-              >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  isAutoTrading ? 'translate-x-6' : 'translate-x-1'
-                }`} />
-              </button>
+        {/* LOCKED FEATURES OVERLAY LOGIC */}
+        {(['parser', 'auto', 'alerts'].includes(tab) && !isPro) ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
+                <Lock size={32} className="text-yellow-500 mb-3" />
+                <h3 className="text-white font-bold mb-1">Feature Locked</h3>
+                <p className="text-xs text-slate-400 mb-4 max-w-[200px]">
+                    Upgrade to Pro to unlock Auto-Trading, Parsers, and Price Alerts.
+                </p>
             </div>
-
-            <div className="space-y-3">
-              <h4 className="text-xs font-bold text-[#71717a] uppercase">Risk Parameters</h4>
-              
-              <div className="grid grid-cols-2 gap-3">
-                 <div>
-                    <label className="text-[10px] text-[#a1a1aa] block mb-1">Lot Size</label>
-                    <input 
-                      type="number" step="0.01"
-                      value={autoTradeConfig.lotSize}
-                      onChange={(e) => updateAutoConfig('lotSize', parseFloat(e.target.value))}
-                      className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
+        ) : (
+            <>
+                {tab === 'parser' && (
+                <div className="space-y-4">
+                    <textarea 
+                    value={pasteText}
+                    onChange={(e) => setPasteText(e.target.value)}
+                    placeholder="Paste signal text here...&#10;e.g. BUY EURUSD @ 1.1050 SL 1.1000 TP 1.1200"
+                    className="w-full h-32 bg-[#09090b] border border-[#27272a] rounded-lg p-3 text-white text-xs resize-none focus:border-blue-600 outline-none"
                     />
-                 </div>
-                 <div>
-                    <label className="text-[10px] text-[#a1a1aa] block mb-1">Max Daily Loss ($)</label>
-                     <input 
-                      type="number"
-                      value={autoTradeConfig.maxDailyLoss}
-                      onChange={(e) => updateAutoConfig('maxDailyLoss', parseFloat(e.target.value))}
-                      className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
-                    />
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                 <div>
-                    <label className="text-[10px] text-[#a1a1aa] block mb-1">Stop Loss (Pips)</label>
-                    <input 
-                      type="number"
-                      value={autoTradeConfig.stopLossPips}
-                      onChange={(e) => updateAutoConfig('stopLossPips', parseFloat(e.target.value))}
-                      className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
-                    />
-                 </div>
-                 <div>
-                    <label className="text-[10px] text-[#a1a1aa] block mb-1">Take Profit (Pips)</label>
-                    <input 
-                      type="number"
-                      value={autoTradeConfig.takeProfitPips}
-                      onChange={(e) => updateAutoConfig('takeProfitPips', parseFloat(e.target.value))}
-                      className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
-                    />
-                 </div>
-              </div>
-
-               <h4 className="text-xs font-bold text-[#71717a] uppercase pt-2">Trading Hours (24h)</h4>
-               <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-[#a1a1aa] block mb-1">Start Hour</label>
-                    <input 
-                      type="number" min="0" max="23"
-                      value={autoTradeConfig.tradingStartHour}
-                      onChange={(e) => updateAutoConfig('tradingStartHour', parseInt(e.target.value))}
-                      className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
-                    />
-                 </div>
-                 <div>
-                    <label className="text-[10px] text-[#a1a1aa] block mb-1">End Hour</label>
-                    <input 
-                      type="number" min="0" max="23"
-                      value={autoTradeConfig.tradingEndHour}
-                      onChange={(e) => updateAutoConfig('tradingEndHour', parseInt(e.target.value))}
-                      className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
-                    />
-                 </div>
-               </div>
-            </div>
-          </div>
-        )}
-
-        {tab === 'alerts' && (
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <input 
-                type="number" 
-                value={alertTarget}
-                onChange={(e) => setAlertTarget(e.target.value)}
-                placeholder="Target Price"
-                className="flex-1 bg-[#09090b] border border-[#27272a] rounded-lg p-2 text-white text-sm outline-none focus:border-blue-600"
-              />
-              <button 
-                onClick={handleSetAlert}
-                className="px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold"
-              >
-                Set
-              </button>
-            </div>
-            
-            <div className="space-y-2 max-h-[200px] overflow-y-auto">
-              {priceAlerts.length === 0 && (
-                <p className="text-xs text-[#71717a] text-center py-4">No active price alerts.</p>
-              )}
-              {priceAlerts.map(alert => (
-                <div key={alert.id} className="bg-[#09090b] border border-[#27272a] rounded p-3 flex justify-between items-center text-xs">
-                  <div>
-                    <span className="font-bold text-white">{alert.pair}</span>
-                    <span className="text-[#a1a1aa] ml-2">
-                        {alert.condition === 'ABOVE' ? '≥' : '≤'} {alert.target.toFixed(5)}
-                    </span>
-                  </div>
-                  <button onClick={() => deleteAlert(alert.id)} className="text-[#71717a] hover:text-red-400">
-                    <Trash2 size={14} />
-                  </button>
+                    <button
+                    onClick={handleParseSignal}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg text-sm transition-colors"
+                    >
+                    Parse & Apply
+                    </button>
                 </div>
-              ))}
-            </div>
-          </div>
+                )}
+
+                {tab === 'auto' && (
+                <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2">
+                    <div className="flex items-center justify-between bg-[#27272a] p-3 rounded-lg">
+                    <span className="text-sm font-bold text-white">Master Switch</span>
+                    <button 
+                        onClick={() => onAutoTradeToggle(!isAutoTrading)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        isAutoTrading ? 'bg-green-500' : 'bg-[#3f3f46]'
+                        }`}
+                    >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        isAutoTrading ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                    </button>
+                    </div>
+
+                    {isAutoTrading && (
+                        <div className="bg-blue-900/20 border border-blue-500/20 rounded-lg p-3 flex items-start gap-2 animate-in fade-in">
+                            <RefreshCw size={16} className="text-blue-400 animate-spin mt-0.5" />
+                            <div>
+                                <h5 className="text-xs font-bold text-blue-100">Multi-Pair Scanner Active</h5>
+                                <p className="text-[10px] text-blue-300/80">
+                                    Bot is actively scanning all 6 major pairs for >70% confidence signals.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="space-y-3">
+                        <h4 className="text-xs font-bold text-[#71717a] uppercase">Risk Parameters</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="text-[10px] text-[#a1a1aa] block mb-1">Lot Size</label>
+                                <input 
+                                type="number" step="0.01"
+                                value={autoTradeConfig.lotSize}
+                                onChange={(e) => updateAutoConfig('lotSize', parseFloat(e.target.value))}
+                                className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
+                                />
+                            </div>
+                             <div>
+                                <label className="text-[10px] text-[#a1a1aa] block mb-1">Stop Loss (Pips)</label>
+                                <input 
+                                type="number"
+                                value={autoTradeConfig.stopLossPips}
+                                onChange={(e) => updateAutoConfig('stopLossPips', parseFloat(e.target.value))}
+                                className="w-full bg-[#09090b] border border-[#27272a] rounded p-2 text-white text-xs"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                )}
+
+                {tab === 'alerts' && (
+                <div className="space-y-4">
+                    <div className="flex gap-2">
+                    <input 
+                        type="number" 
+                        value={alertTarget}
+                        onChange={(e) => setAlertTarget(e.target.value)}
+                        placeholder="Target Price"
+                        className="flex-1 bg-[#09090b] border border-[#27272a] rounded-lg p-2 text-white text-sm outline-none focus:border-blue-600"
+                    />
+                    <button 
+                        onClick={handleSetAlert}
+                        className="px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold"
+                    >
+                        Set
+                    </button>
+                    </div>
+                    
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                    {priceAlerts.length === 0 && (
+                        <p className="text-xs text-[#71717a] text-center py-4">No active price alerts.</p>
+                    )}
+                    {priceAlerts.map(alert => (
+                        <div key={alert.id} className="bg-[#09090b] border border-[#27272a] rounded p-3 flex justify-between items-center text-xs">
+                        <div>
+                            <span className="font-bold text-white">{alert.pair}</span>
+                            <span className="text-[#a1a1aa] ml-2">
+                                {alert.condition === 'ABOVE' ? '≥' : '≤'} {alert.target.toFixed(5)}
+                            </span>
+                        </div>
+                        <button onClick={() => deleteAlert(alert.id)} className="text-[#71717a] hover:text-red-400">
+                            <Trash2 size={14} />
+                        </button>
+                        </div>
+                    ))}
+                    </div>
+                </div>
+                )}
+            </>
         )}
       </div>
     </div>

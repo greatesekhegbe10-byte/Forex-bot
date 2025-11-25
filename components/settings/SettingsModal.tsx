@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Server, ShieldCheck, Globe, Layout, Key, Box, AlertTriangle } from 'lucide-react';
-import { BrokerConfig, AppSettings, BrokerType } from '../../types';
+import { X, Server, ShieldCheck, Globe, Layout, Key, Box, AlertTriangle, CreditCard, Lock, CheckCircle, Clock } from 'lucide-react';
+import { BrokerConfig, AppSettings, BrokerType, SubscriptionStatus } from '../../types';
+import { BANK_DETAILS, initiatePaymentVerification, getStoredSubscription } from '../../services/paymentService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -9,6 +10,8 @@ interface SettingsModalProps {
   onSave: (config: BrokerConfig, appSettings: AppSettings) => void;
   currentConfig: BrokerConfig | null;
   currentAppSettings: AppSettings;
+  subscriptionStatus: SubscriptionStatus;
+  onSubscriptionUpdate: (status: SubscriptionStatus) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -16,9 +19,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose, 
   onSave, 
   currentConfig, 
-  currentAppSettings 
+  currentAppSettings,
+  subscriptionStatus,
+  onSubscriptionUpdate
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'api'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'api' | 'pro'>('general');
 
   // Broker Config
   const [brokerType, setBrokerType] = useState<BrokerType>(BrokerType.MT5);
@@ -28,11 +33,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [customRegion, setCustomRegion] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // App Settings
   const [appName, setAppName] = useState('');
   const [domainUrl, setDomainUrl] = useState('');
-  const [geminiApiKey, setGeminiApiKey] = useState('');
+
+  // Payment
+  const [senderName, setSenderName] = useState('');
+  const [localSubStatus, setLocalSubStatus] = useState<SubscriptionStatus>(SubscriptionStatus.FREE);
 
   useEffect(() => {
     if (currentConfig) {
@@ -40,7 +49,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setAccountId(currentConfig.accountId || '');
       setAccessToken(currentConfig.accessToken || '');
       setRegion(currentConfig.region || 'new-york');
-      // If region is not in standard list, set it as custom
       const standardRegions = ['new-york', 'london', 'frankfurt', 'singapore', 'tokyo', 'mumbai', 'hong-kong', 'sao-paulo', 'johannesburg', 'bahrain'];
       if (currentConfig.region && !standardRegions.includes(currentConfig.region)) {
          setRegion('custom');
@@ -52,14 +60,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (currentAppSettings) {
       setAppName(currentAppSettings.appName);
       setDomainUrl(currentAppSettings.domainUrl);
-      setGeminiApiKey(currentAppSettings.geminiApiKey || '');
     }
-  }, [currentConfig, currentAppSettings, isOpen]);
+    setLocalSubStatus(subscriptionStatus);
+  }, [currentConfig, currentAppSettings, isOpen, subscriptionStatus]);
 
   if (!isOpen) return null;
 
+  const validateBrokerConfig = (): boolean => {
+    setValidationError(null);
+    if (brokerType === BrokerType.MT5) {
+      if (!accountId.trim()) {
+        setValidationError("MetaTrader Account ID is required.");
+        return false;
+      }
+      if (!accessToken.trim()) {
+        setValidationError("MetaAPI Access Token is required.");
+        return false;
+      }
+      if (region === 'custom' && !customRegion.trim()) {
+        setValidationError("Custom Region Slug is required.");
+        return false;
+      }
+    } else {
+      // For Webhook brokers
+      if (!webhookUrl.trim()) {
+        setValidationError("Webhook/Bridge URL is required for this broker.");
+        return false;
+      }
+      // Simple URL validation
+      if (!webhookUrl.startsWith('http')) {
+        setValidationError("Webhook URL must start with http:// or https://");
+        return false;
+      }
+    }
+    return true;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Only validate if we are saving broker settings
+    if (activeTab === 'api') {
+      if (!validateBrokerConfig()) return;
+    }
+
     const finalRegion = region === 'custom' ? customRegion : region;
     
     onSave(
@@ -67,11 +111,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       { 
         appName, 
         domainUrl,
-        beginnerMode: currentAppSettings.beginnerMode,
-        geminiApiKey
+        beginnerMode: currentAppSettings.beginnerMode
       }
     );
     onClose();
+  };
+
+  const handlePaymentSubmit = () => {
+    if (!senderName.trim()) return;
+    const newStatus = initiatePaymentVerification(senderName);
+    setLocalSubStatus(newStatus);
+    onSubscriptionUpdate(newStatus);
   };
 
   return (
@@ -103,6 +153,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <Server size={14} /> Broker
+          </button>
+          <button
+            onClick={() => setActiveTab('pro')}
+            className={`flex-1 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+              activeTab === 'pro' ? 'bg-slate-800 text-white border-b-2 border-yellow-500' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <CreditCard size={14} className="text-yellow-500" /> Plan
           </button>
         </div>
 
@@ -136,41 +194,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   placeholder="e.g. trading.com"
                 />
               </div>
-
-              <div className="pt-4 border-t border-slate-800 space-y-2">
-                <h3 className="text-xs font-bold text-white uppercase mb-2 flex items-center gap-2">
-                  <Key size={12} /> AI & Security
-                </h3>
-                <div className="bg-slate-800/50 p-3 rounded border border-slate-700 mb-2">
-                    <p className="text-[10px] text-slate-400 leading-relaxed flex gap-2">
-                        <ShieldCheck size={14} className="shrink-0 text-green-500" />
-                        API Keys are stored locally on your device in an encrypted format. They are never transmitted to our servers.
-                    </p>
-                </div>
-                <label className="text-xs text-slate-400 font-semibold uppercase">Gemini API Key</label>
-                <input
-                  type="password"
-                  value={geminiApiKey}
-                  onChange={(e) => setGeminiApiKey(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
-                  placeholder="AI Studio API Key (Starts with AIza...)"
-                />
-                <p className="text-[10px] text-slate-500">
-                  Required for AI Analyst to work on this device.
-                </p>
-              </div>
             </div>
           )}
 
           {activeTab === 'api' && (
             <div className="space-y-4">
+              {validationError && (
+                <div className="bg-red-500/10 border border-red-500/50 rounded p-3 text-xs text-red-200 flex items-center gap-2">
+                   <AlertTriangle size={14} /> {validationError}
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="text-xs text-slate-400 font-semibold uppercase flex items-center gap-2">
                   <Box size={12} /> Broker Platform
                 </label>
                 <select
                   value={brokerType}
-                  onChange={(e) => setBrokerType(e.target.value as BrokerType)}
+                  onChange={(e) => {
+                    setBrokerType(e.target.value as BrokerType);
+                    setValidationError(null);
+                  }}
                   className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value={BrokerType.MT5}>MetaTrader 5 (MetaAPI)</option>
@@ -186,7 +230,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Connects directly via MetaAPI cloud. Support for all global regions.
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs text-slate-400 font-semibold uppercase">Access Token</label>
+                    <label className="text-xs text-slate-400 font-semibold uppercase">Access Token <span className="text-red-400">*</span></label>
                     <input
                       type="password"
                       value={accessToken}
@@ -196,7 +240,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs text-slate-400 font-semibold uppercase">Account ID</label>
+                    <label className="text-xs text-slate-400 font-semibold uppercase">Account ID <span className="text-red-400">*</span></label>
                     <input
                       type="text"
                       value={accountId}
@@ -211,23 +255,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onChange={(e) => setRegion(e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                     >
-                      <option value="new-york">New York (North America)</option>
-                      <option value="london">London (Europe)</option>
-                      <option value="frankfurt">Frankfurt (Europe)</option>
-                      <option value="singapore">Singapore (Asia)</option>
-                      <option value="tokyo">Tokyo (Asia)</option>
-                      <option value="mumbai">Mumbai (India)</option>
-                      <option value="hong-kong">Hong Kong (Asia)</option>
-                      <option value="sao-paulo">Sao Paulo (South America)</option>
-                      <option value="johannesburg">Johannesburg (Africa)</option>
-                      <option value="bahrain">Bahrain (Middle East)</option>
+                      <option value="new-york">New York</option>
+                      <option value="london">London</option>
+                      <option value="frankfurt">Frankfurt</option>
+                      <option value="singapore">Singapore</option>
+                      <option value="tokyo">Tokyo</option>
+                      <option value="mumbai">Mumbai</option>
+                      <option value="hong-kong">Hong Kong</option>
+                      <option value="sao-paulo">Sao Paulo</option>
+                      <option value="johannesburg">Johannesburg</option>
+                      <option value="bahrain">Bahrain</option>
                       <option value="custom">Custom / Other</option>
                     </select>
                   </div>
                   
                   {region === 'custom' && (
                     <div className="space-y-1 animate-in slide-in-from-top-2">
-                       <label className="text-xs text-slate-400 font-semibold uppercase">Custom Region Slug</label>
+                       <label className="text-xs text-slate-400 font-semibold uppercase">Custom Region Slug <span className="text-red-400">*</span></label>
                        <input
                           type="text"
                           value={customRegion}
@@ -235,27 +279,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                           placeholder="e.g. toronto"
                         />
-                        <p className="text-[10px] text-yellow-500 flex items-center gap-1">
-                          <AlertTriangle size={10} />
-                          Ensure this matches the MetaAPI URL region code exactly.
-                        </p>
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="space-y-4 pt-2 animate-in fade-in">
                    <div className="bg-yellow-900/20 border border-yellow-800/50 rounded p-3 text-xs text-yellow-200">
-                    <strong>Note:</strong> IQ Option and Pocket Option do not have public APIs for web browsers. 
-                    You must use a Webhook Bridge/Extension URL that listens for these signals.
+                    <strong>Note:</strong> Bridge URL required.
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs text-slate-400 font-semibold uppercase">Webhook / Bridge URL</label>
+                    <label className="text-xs text-slate-400 font-semibold uppercase">Webhook / Bridge URL <span className="text-red-400">*</span></label>
                     <input
                       type="text"
                       value={webhookUrl}
                       onChange={(e) => setWebhookUrl(e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      placeholder="http://localhost:3000/trade or Bridge URL"
+                      placeholder="http://localhost:3000/trade"
                     />
                   </div>
                   <div className="space-y-1">
@@ -272,21 +311,98 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          <div className="flex justify-end pt-4 border-t border-slate-800 gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-6 py-2 rounded shadow-lg transition-colors"
-            >
-              Save Changes
-            </button>
-          </div>
+          {activeTab === 'pro' && (
+            <div className="space-y-5">
+              <div className="text-center pb-4 border-b border-slate-800">
+                 <h3 className="text-white font-bold text-lg mb-1">Upgrade to Pro</h3>
+                 <p className="text-xs text-slate-400">Unlock Auto-Trading, AI Analysis & Backtesting</p>
+              </div>
+
+              {localSubStatus === SubscriptionStatus.FREE && (
+                <div className="space-y-4">
+                  <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Bank Transfer Details (Nigeria)</h4>
+                    <div className="space-y-2 text-sm text-white font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Bank:</span>
+                        <span>{BANK_DETAILS.bankName}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Acct No:</span>
+                        <span className="font-bold text-yellow-400">{BANK_DETAILS.accountNumber}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Name:</span>
+                        <span>{BANK_DETAILS.accountName}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t border-slate-700">
+                        <span className="text-slate-500">Amount:</span>
+                        <span className="font-bold">{BANK_DETAILS.currency} {BANK_DETAILS.amountNGN.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs text-slate-400 font-semibold uppercase">Sender Name (For Verification)</label>
+                    <input
+                      type="text"
+                      value={senderName}
+                      onChange={(e) => setSenderName(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                      placeholder="Enter the name on your bank account"
+                    />
+                    <button
+                      type="button"
+                      onClick={handlePaymentSubmit}
+                      disabled={!senderName.trim()}
+                      className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg mt-2 flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle size={16} /> I Have Made Payment
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {localSubStatus === SubscriptionStatus.PENDING && (
+                <div className="bg-yellow-900/10 border border-yellow-700/50 rounded-xl p-6 text-center">
+                  <Clock size={48} className="text-yellow-500 mx-auto mb-4 animate-pulse" />
+                  <h3 className="text-white font-bold mb-2">Verification In Progress</h3>
+                  <p className="text-sm text-yellow-200/80 leading-relaxed">
+                    We are currently verifying your payment of NGN {BANK_DETAILS.amountNGN.toLocaleString()}.<br/>
+                    This usually takes 10-30 minutes. Features will unlock automatically upon confirmation.
+                  </p>
+                </div>
+              )}
+
+              {localSubStatus === SubscriptionStatus.PRO && (
+                <div className="bg-green-900/10 border border-green-700/50 rounded-xl p-6 text-center">
+                  <ShieldCheck size={48} className="text-green-500 mx-auto mb-4" />
+                  <h3 className="text-white font-bold mb-2">Pro Account Active</h3>
+                  <p className="text-sm text-green-200/80 leading-relaxed">
+                    Thank you for your payment. All features including Auto-Trading and AI Analysis are unlocked.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab !== 'pro' && (
+            <div className="flex justify-end pt-4 border-t border-slate-800 gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-6 py-2 rounded shadow-lg transition-colors"
+              >
+                Save Changes
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </div>

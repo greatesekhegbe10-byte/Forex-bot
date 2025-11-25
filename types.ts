@@ -1,4 +1,5 @@
 
+
 export enum StrategyType {
   MA_CROSSOVER = 'MA_CROSSOVER',
   RSI = 'RSI',
@@ -62,10 +63,17 @@ export interface GeminiAnalysisResult {
   actionableAdvice: string;
 }
 
+export enum SubscriptionStatus {
+  FREE = 'FREE',
+  PENDING = 'PENDING',
+  PRO = 'PRO'
+}
+
 export interface User {
   id: string;
   email: string;
   name: string;
+  subscription: SubscriptionStatus;
 }
 
 export interface AuthState {
@@ -95,7 +103,6 @@ export interface AppSettings {
   appName: string;
   domainUrl: string;
   beginnerMode: boolean;
-  geminiApiKey?: string;
 }
 
 export interface TradeOrder {
@@ -145,4 +152,11 @@ export interface MetaPosition {
   swap: number;
   commission: number;
   time: string;
+}
+
+export interface PaymentRequest {
+  senderName: string;
+  amount: number;
+  date: string;
+  reference: string;
 }
