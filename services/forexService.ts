@@ -1,72 +1,72 @@
 import { Candle, SignalType, StrategyType, BacktestResult, Trend, MarketAnalysis, BrokerConfig, BrokerType, TradeOrder, ParsedSignal, MetaAccountInfo, MetaPosition } from '../types';
 import { logger } from './logger';
 
-// --- Constants ---
+// --- Constants (Updated to approx. late 2024/2025 Market Levels) ---
 const PAIR_CONFIGS: Record<string, { initialPrice: number, volatility: number }> = {
   // Majors
-  'EUR/USD': { initialPrice: 1.1000, volatility: 0.0015 },
-  'GBP/USD': { initialPrice: 1.2700, volatility: 0.0020 },
-  'USD/JPY': { initialPrice: 148.50, volatility: 0.1500 },
-  'USD/CHF': { initialPrice: 0.8850, volatility: 0.0012 },
-  'AUD/USD': { initialPrice: 0.6550, volatility: 0.0010 },
-  'USD/CAD': { initialPrice: 1.3500, volatility: 0.0018 },
-  'NZD/USD': { initialPrice: 0.6100, volatility: 0.0011 },
+  'EUR/USD': { initialPrice: 1.0850, volatility: 0.0015 },
+  'GBP/USD': { initialPrice: 1.3000, volatility: 0.0020 },
+  'USD/JPY': { initialPrice: 153.50, volatility: 0.1500 },
+  'USD/CHF': { initialPrice: 0.8650, volatility: 0.0012 },
+  'AUD/USD': { initialPrice: 0.6600, volatility: 0.0010 },
+  'USD/CAD': { initialPrice: 1.3900, volatility: 0.0018 },
+  'NZD/USD': { initialPrice: 0.6000, volatility: 0.0011 },
 
   // Minors
-  'EUR/GBP': { initialPrice: 0.8550, volatility: 0.0010 },
-  'EUR/JPY': { initialPrice: 163.50, volatility: 0.1600 },
-  'GBP/JPY': { initialPrice: 189.00, volatility: 0.2000 },
-  'AUD/JPY': { initialPrice: 97.50, volatility: 0.1200 },
+  'EUR/GBP': { initialPrice: 0.8350, volatility: 0.0010 },
+  'EUR/JPY': { initialPrice: 165.50, volatility: 0.1600 },
+  'GBP/JPY': { initialPrice: 198.00, volatility: 0.2000 },
+  'AUD/JPY': { initialPrice: 101.50, volatility: 0.1200 },
   'CAD/JPY': { initialPrice: 110.00, volatility: 0.1300 },
-  'CHF/JPY': { initialPrice: 168.00, volatility: 0.1400 },
-  'NZD/JPY': { initialPrice: 90.50, volatility: 0.1100 },
-  'GBP/CHF': { initialPrice: 1.1200, volatility: 0.0015 },
-  'EUR/CHF': { initialPrice: 0.9500, volatility: 0.0010 },
-  'AUD/CAD': { initialPrice: 0.8900, volatility: 0.0012 },
-  'EUR/CAD': { initialPrice: 1.4800, volatility: 0.0016 },
-  'GBP/CAD': { initialPrice: 1.7100, volatility: 0.0022 },
-  'AUD/NZD': { initialPrice: 1.0750, volatility: 0.0010 },
-  'EUR/AUD': { initialPrice: 1.6500, volatility: 0.0018 },
-  'GBP/AUD': { initialPrice: 1.9300, volatility: 0.0025 },
-  'EUR/NZD': { initialPrice: 1.7700, volatility: 0.0020 },
-  'GBP/NZD': { initialPrice: 2.0800, volatility: 0.0028 },
-  'AUD/CHF': { initialPrice: 0.5800, volatility: 0.0009 },
-  'CAD/CHF': { initialPrice: 0.6500, volatility: 0.0010 },
-  'NZD/CHF': { initialPrice: 0.5400, volatility: 0.0009 },
-  'NZD/CAD': { initialPrice: 0.8300, volatility: 0.0011 },
+  'CHF/JPY': { initialPrice: 176.00, volatility: 0.1400 },
+  'NZD/JPY': { initialPrice: 91.50, volatility: 0.1100 },
+  'GBP/CHF': { initialPrice: 1.1250, volatility: 0.0015 },
+  'EUR/CHF': { initialPrice: 0.9400, volatility: 0.0010 },
+  'AUD/CAD': { initialPrice: 0.9100, volatility: 0.0012 },
+  'EUR/CAD': { initialPrice: 1.5000, volatility: 0.0016 },
+  'GBP/CAD': { initialPrice: 1.8000, volatility: 0.0022 },
+  'AUD/NZD': { initialPrice: 1.1000, volatility: 0.0010 },
+  'EUR/AUD': { initialPrice: 1.6400, volatility: 0.0018 },
+  'GBP/AUD': { initialPrice: 1.9600, volatility: 0.0025 },
+  'EUR/NZD': { initialPrice: 1.8000, volatility: 0.0020 },
+  'GBP/NZD': { initialPrice: 2.1600, volatility: 0.0028 },
+  'AUD/CHF': { initialPrice: 0.5700, volatility: 0.0009 },
+  'CAD/CHF': { initialPrice: 0.6200, volatility: 0.0010 },
+  'NZD/CHF': { initialPrice: 0.5200, volatility: 0.0009 },
+  'NZD/CAD': { initialPrice: 0.8350, volatility: 0.0011 },
 
   // Exotics
-  'USD/SGD': { initialPrice: 1.3400, volatility: 0.0010 },
-  'USD/HKD': { initialPrice: 7.8200, volatility: 0.0005 },
-  'USD/TRY': { initialPrice: 32.50, volatility: 0.2500 },
-  'USD/ZAR': { initialPrice: 18.80, volatility: 0.1500 },
-  'USD/MXN': { initialPrice: 16.70, volatility: 0.0800 },
-  'USD/NOK': { initialPrice: 10.60, volatility: 0.0500 },
-  'USD/SEK': { initialPrice: 10.35, volatility: 0.0500 },
-  'USD/DKK': { initialPrice: 6.8500, volatility: 0.0030 },
-  'EUR/TRY': { initialPrice: 35.20, volatility: 0.3000 },
-  'EUR/NOK': { initialPrice: 11.45, volatility: 0.0600 },
-  'EUR/SEK': { initialPrice: 11.25, volatility: 0.0600 },
-  'USD/PLN': { initialPrice: 3.9500, volatility: 0.0200 },
-  'EUR/PLN': { initialPrice: 4.3000, volatility: 0.0150 },
-  'USD/HUF': { initialPrice: 360.00, volatility: 1.5000 },
-  'EUR/HUF': { initialPrice: 390.00, volatility: 1.2000 },
+  'USD/SGD': { initialPrice: 1.3200, volatility: 0.0010 },
+  'USD/HKD': { initialPrice: 7.7800, volatility: 0.0005 },
+  'USD/TRY': { initialPrice: 34.50, volatility: 0.2500 },
+  'USD/ZAR': { initialPrice: 17.50, volatility: 0.1500 },
+  'USD/MXN': { initialPrice: 20.20, volatility: 0.0800 },
+  'USD/NOK': { initialPrice: 11.00, volatility: 0.0500 },
+  'USD/SEK': { initialPrice: 10.80, volatility: 0.0500 },
+  'USD/DKK': { initialPrice: 6.9000, volatility: 0.0030 },
+  'EUR/TRY': { initialPrice: 37.50, volatility: 0.3000 },
+  'EUR/NOK': { initialPrice: 11.80, volatility: 0.0600 },
+  'EUR/SEK': { initialPrice: 11.60, volatility: 0.0600 },
+  'USD/PLN': { initialPrice: 4.0000, volatility: 0.0200 },
+  'EUR/PLN': { initialPrice: 4.3500, volatility: 0.0150 },
+  'USD/HUF': { initialPrice: 375.00, volatility: 1.5000 },
+  'EUR/HUF': { initialPrice: 405.00, volatility: 1.2000 },
   
   // Metals/Commodities
-  'XAU/USD': { initialPrice: 2350.00, volatility: 15.00 }, // Gold
-  'XAG/USD': { initialPrice: 28.50, volatility: 0.25 },   // Silver
-  'XTI/USD': { initialPrice: 82.00, volatility: 0.80 },   // Oil
-  'XBR/USD': { initialPrice: 86.00, volatility: 0.80 },   // Brent Oil
+  'XAU/USD': { initialPrice: 2740.00, volatility: 15.00 }, // Gold (Updated)
+  'XAG/USD': { initialPrice: 32.50, volatility: 0.25 },    // Silver
+  'XTI/USD': { initialPrice: 70.00, volatility: 0.80 },    // Oil
+  'XBR/USD': { initialPrice: 74.00, volatility: 0.80 },    // Brent Oil
 
   // Crypto
-  'BTC/USD': { initialPrice: 65000.00, volatility: 800.00 },
-  'ETH/USD': { initialPrice: 3500.00, volatility: 50.00 },
-  'LTC/USD': { initialPrice: 85.00, volatility: 1.50 },
-  'XRP/USD': { initialPrice: 0.6000, volatility: 0.0100 },
-  'SOL/USD': { initialPrice: 145.00, volatility: 3.00 },
-  'BNB/USD': { initialPrice: 600.00, volatility: 8.00 },
-  'ADA/USD': { initialPrice: 0.4500, volatility: 0.0080 },
-  'DOGE/USD': { initialPrice: 0.1600, volatility: 0.0050 },
+  'BTC/USD': { initialPrice: 71000.00, volatility: 800.00 }, // BTC Updated
+  'ETH/USD': { initialPrice: 2600.00, volatility: 50.00 },
+  'LTC/USD': { initialPrice: 70.00, volatility: 1.50 },
+  'XRP/USD': { initialPrice: 0.5200, volatility: 0.0100 },
+  'SOL/USD': { initialPrice: 165.00, volatility: 3.00 },
+  'BNB/USD': { initialPrice: 590.00, volatility: 8.00 },
+  'ADA/USD': { initialPrice: 0.3500, volatility: 0.0080 },
+  'DOGE/USD': { initialPrice: 0.1400, volatility: 0.0050 },
 };
 
 // Helper to determine decimals and pip value based on pair type
@@ -86,6 +86,26 @@ export const getPairSettings = (pair: string) => {
   // Standard Forex
   return { digits: 4, pipValue: 0.0001 };
 };
+
+// --- Helper: Robust Fetch with Retry ---
+async function fetchWithRetry(url: string, options: RequestInit, retries = 2, backoff = 500): Promise<Response> {
+  try {
+    const response = await fetch(url, options);
+    // Retry on server errors (5xx) or rate limits (429)
+    if (!response.ok && (response.status >= 500 || response.status === 429)) {
+       throw new Error(`Server status: ${response.status}`);
+    }
+    return response;
+  } catch (err: any) {
+    if (retries > 0) {
+      logger.debug(`Retrying request to ${url} (${retries} left)...`);
+      await new Promise(r => setTimeout(r, backoff));
+      return fetchWithRetry(url, options, retries - 1, backoff * 1.5);
+    }
+    // Final error
+    throw err;
+  }
+}
 
 // --- Helper Math Functions ---
 
@@ -177,14 +197,67 @@ export const calculateATR = (highs: number[], lows: number[], closes: number[], 
   return atrs;
 };
 
+// --- Live Public Data Fetcher (Seed Price) ---
+
+export const fetchPublicCurrentPrice = async (pair: string): Promise<number | null> => {
+  try {
+    // 1. Crypto Handling (CoinCap API - Free, No Key)
+    const cryptoMap: Record<string, string> = {
+      'BTC/USD': 'bitcoin', 'ETH/USD': 'ethereum', 'LTC/USD': 'litecoin', 
+      'XRP/USD': 'xrp', 'SOL/USD': 'solana', 'BNB/USD': 'binance-coin', 
+      'ADA/USD': 'cardano', 'DOGE/USD': 'dogecoin'
+    };
+    
+    if (cryptoMap[pair]) {
+      const response = await fetchWithRetry(`https://api.coincap.io/v2/assets/${cryptoMap[pair]}`, {}, 1);
+      if (response.ok) {
+        const json = await response.json();
+        const price = parseFloat(json.data.priceUsd);
+        if (!isNaN(price)) return price;
+      }
+    }
+
+    // 2. Forex/Metals Handling (Open Exchange Rates / ER-API - Free, No Key)
+    const isForex = !pair.includes('BTC') && !pair.includes('ETH');
+    
+    if (isForex) {
+      const response = await fetchWithRetry('https://open.er-api.com/v6/latest/USD', {}, 1);
+      if (response.ok) {
+        const json = await response.json();
+        const rates = json.rates;
+        const [base, quote] = pair.split('/');
+        
+        let price = 0;
+        if (quote === 'USD') {
+           const baseRate = rates[base];
+           if (baseRate) price = 1 / baseRate;
+        } else if (base === 'USD') {
+           const quoteRate = rates[quote];
+           if (quoteRate) price = quoteRate;
+        } else {
+           const baseRate = rates[base];
+           const quoteRate = rates[quote];
+           if (baseRate && quoteRate) {
+             price = quoteRate / baseRate;
+           }
+        }
+        if (price > 0) return price;
+      }
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
+};
+
 // --- Data Generation (Fallback) ---
 
-export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300, timeframe: string = '1h'): Candle[] => {
+export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300, timeframe: string = '1h', overrideEndPrice?: number): Candle[] => {
   const config = PAIR_CONFIGS[pair] || PAIR_CONFIGS['EUR/USD'];
   
-  // Adjust volatility based on timeframe
   let timeMultiplier = 1;
-  let intervalMs = 60 * 60 * 1000; // default 1h
+  let intervalMs = 60 * 60 * 1000;
 
   switch (timeframe) {
     case '1m': timeMultiplier = 0.05; intervalMs = 60 * 1000; break;
@@ -199,6 +272,7 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
   const adjustedVolatility = volatility * timeMultiplier;
   
   const data: Candle[] = [];
+  
   let currentPrice = initialPrice;
   const now = new Date();
 
@@ -207,7 +281,6 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
   const lows: number[] = [];
   const closes: number[] = [];
   
-  // Generate base price line first
   for (let i = 0; i < count + 200; i++) {
     const change = (Math.random() - 0.5) * adjustedVolatility;
     currentPrice += change;
@@ -215,13 +288,19 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
     prices.push(currentPrice);
   }
 
-  // Pre-calculate OHLC arrays for indicators
+  if (overrideEndPrice && prices.length > 0) {
+    const lastGenerated = prices[prices.length - 1];
+    const difference = overrideEndPrice - lastGenerated;
+    for(let i = 0; i < prices.length; i++) {
+      prices[i] += difference;
+    }
+  }
+
   const rawCandles: any[] = [];
   for (let i = 200; i < prices.length; i++) {
     const close = prices[i];
     const prevClose = prices[i-1];
     
-    // Simulate OHLC mechanics
     const open = prevClose; 
     const bodyMax = Math.max(open, close);
     const bodyMin = Math.min(open, close);
@@ -235,15 +314,12 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
     closes.push(close);
   }
 
-  // Calculate Bulk Indicators
   const macdData = calculateMACD(closes);
   const atrData = calculateATR(highs, lows, closes, 14);
 
-  // Construct Final Candles
   for (let i = 0; i < rawCandles.length; i++) {
     const c = rawCandles[i];
-    // Need full history for simple MAs/RSI as implemented
-    const historySlice = prices.slice(0, i + 201); // approximate mapping back to full price array
+    const historySlice = prices.slice(0, i + 201);
 
     data.push({
       ...c,
@@ -292,7 +368,8 @@ export const fetchMetaApiCandles = async (
     const startTime = new Date(Date.now() - (minutes * 60 * 1000));
     const url = `${baseUrl}/users/current/accounts/${config.accountId}/history-candles?symbol=${symbol}&timeframe=${timeframe}&startTime=${startTime.toISOString()}&limit=${count}`;
     
-    const response = await fetch(url, {
+    // Use Retry Mechanism
+    const response = await fetchWithRetry(url, {
       method: 'GET',
       headers: {
         'auth-token': config.accessToken,
@@ -359,6 +436,7 @@ export const fetchMetaApiCandles = async (
     return finalData.filter(c => c.ma200 !== undefined);
 
   } catch (error: any) {
+    // Only warn if it's not an intentional fallback
     logger.warn("MetaAPI Data Fetch failed, reverting to simulation", error.message);
     throw error;
   }
@@ -376,7 +454,7 @@ export const fetchAccountInfo = async (config: BrokerConfig): Promise<MetaAccoun
     const url = `${baseUrl}/users/current/accounts/${config.accountId}/information`;
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithRetry(url, {
             method: 'GET',
             headers: {
                 'auth-token': config.accessToken || '',
@@ -407,7 +485,7 @@ export const fetchOpenPositions = async (config: BrokerConfig): Promise<MetaPosi
     const url = `${baseUrl}/users/current/accounts/${config.accountId}/positions`;
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithRetry(url, {
             method: 'GET',
             headers: {
                 'auth-token': config.accessToken || '',
@@ -432,6 +510,8 @@ export const fetchOpenPositions = async (config: BrokerConfig): Promise<MetaPosi
             time: p.time
         }));
     } catch (error: any) {
+        // Return empty array on failure to avoid UI crash, but log it
+        logger.warn("Failed to fetch positions", error.message);
         return [];
     }
 };
@@ -444,7 +524,7 @@ export const closeMetaApiPosition = async (config: BrokerConfig, positionId: str
     const url = `${baseUrl}/users/current/accounts/${config.accountId}/positions/${positionId}/close`;
     
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithRetry(url, {
             method: 'POST', 
             headers: {
                 'auth-token': config.accessToken || '',
@@ -466,13 +546,17 @@ export const closeMetaApiPosition = async (config: BrokerConfig, positionId: str
 export const executeBrokerTrade = async (config: BrokerConfig, order: TradeOrder) => {
   logger.info(`Initiating Trade via ${config.type}`, order);
 
+  // 1. Validation Logic
+  if (order.volume <= 0) throw new Error("Volume must be greater than 0");
+  if (!order.symbol) throw new Error("Symbol missing");
+  
   if (config.type === BrokerType.MT5) {
       if (!config.accountId || !config.accessToken) throw new Error("Invalid MT5 Broker Configuration");
       const region = config.region || 'new-york';
       const baseUrl = `https://mt-client-api-v1.${region}.agiliumtrade.ai`; 
       const url = `${baseUrl}/users/current/accounts/${config.accountId}/trade`;
 
-      const response = await fetch(url, {
+      const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: {
           'auth-token': config.accessToken,
@@ -489,15 +573,24 @@ export const executeBrokerTrade = async (config: BrokerConfig, order: TradeOrder
       });
 
       if (!response.ok) {
-         const err = await response.text();
-         throw new Error(`MT5 Trade Failed: ${err}`);
+         // Attempt to parse JSON error first, then text
+         let errMsg = `MT5 Trade Failed (${response.status})`;
+         try {
+             const jsonErr = await response.json();
+             if (jsonErr.message) errMsg += `: ${jsonErr.message}`;
+             else if (jsonErr.error) errMsg += `: ${jsonErr.error}`;
+         } catch {
+             const textErr = await response.text();
+             if (textErr) errMsg += `: ${textErr}`;
+         }
+         throw new Error(errMsg);
       }
       return await response.json();
   } 
   
   else if (config.type === BrokerType.IQ_OPTION || config.type === BrokerType.POCKET_OPTION || config.type === BrokerType.CUSTOM_WEBHOOK) {
       if (!config.webhookUrl) {
-          throw new Error(`${config.type} requires a Bridge/Webhook URL to execute trades.`);
+          throw new Error(`${config.type} requires a Bridge/Webhook URL.`);
       }
 
       const payload = {
@@ -511,11 +604,11 @@ export const executeBrokerTrade = async (config: BrokerConfig, order: TradeOrder
       };
 
       try {
-        const response = await fetch(config.webhookUrl, {
+        const response = await fetchWithRetry(config.webhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        });
+        }, 1); // Less retry for bridge
         
         if (!response.ok) throw new Error(`Bridge Error: ${response.statusText}`);
         return { status: 'sent', payload };

@@ -86,11 +86,47 @@ export const TradePanel: React.FC<TradePanelProps> = ({
     });
   }, [currentPrice, activePair, notify]);
 
+  const validateOrder = (type: 'BUY' | 'SELL'): boolean => {
+      if (lotSize <= 0) {
+          notify('error', 'Invalid Volume', 'Lot size must be greater than 0');
+          return false;
+      }
+      
+      const sl = parseFloat(stopLoss);
+      const tp = parseFloat(takeProfit);
+
+      if (stopLoss && !isNaN(sl)) {
+          if (sl < 0) {
+             notify('error', 'Invalid SL', 'Stop Loss cannot be negative');
+             return false;
+          }
+          if (type === 'BUY' && sl >= currentPrice) {
+              notify('warning', 'Risk Warning', 'For BUY orders, SL should typically be below current price.');
+              // We allow it but warn, as buy stop orders exist, but this is market execution context usually
+          }
+          if (type === 'SELL' && sl <= currentPrice) {
+              notify('warning', 'Risk Warning', 'For SELL orders, SL should typically be above current price.');
+          }
+      }
+
+      if (takeProfit && !isNaN(tp)) {
+          if (tp < 0) {
+             notify('error', 'Invalid TP', 'Take Profit cannot be negative');
+             return false;
+          }
+      }
+
+      return true;
+  };
+
   const handleExecute = async (type: 'BUY' | 'SELL') => {
     if (!brokerConfig) {
       notify('error', 'Configuration Missing', 'Please connect your broker account in Settings.');
       return;
     }
+    
+    if (!validateOrder(type)) return;
+
     setIsExecuting(true);
     try {
       const order: TradeOrder = {
@@ -256,6 +292,7 @@ export const TradePanel: React.FC<TradePanelProps> = ({
                  <input 
                    type="number" 
                    step="0.01"
+                   min="0.01"
                    value={lotSize}
                    onChange={(e) => setLotSize(parseFloat(e.target.value))}
                    className="w-full bg-[#09090b] border border-[#27272a] rounded-lg p-3 text-white text-sm focus:border-blue-600 outline-none font-mono"

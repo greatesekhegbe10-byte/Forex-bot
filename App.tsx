@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Activity, ChevronDown, Settings, LogOut, Info } from 'lucide-react';
-import { generateMarketData, analyzeMarket, fetchMetaApiCandles, executeBrokerTrade, fetchAccountInfo, fetchOpenPositions } from './services/forexService';
+import { generateMarketData, analyzeMarket, fetchMetaApiCandles, executeBrokerTrade, fetchAccountInfo, fetchOpenPositions, fetchPublicCurrentPrice } from './services/forexService';
 import { generateMarketInsight } from './services/geminiService';
 import { Candle, MarketAnalysis, AuthState, BrokerConfig, User, AppSettings, AutoTradeConfig, TradeOrder, SignalType, MetaAccountInfo, MetaPosition, BrokerType, GeminiAnalysisResult } from './types';
 import { ForexChart } from './components/charts/ForexChart';
@@ -132,11 +132,27 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Failed to parse auto trade config", e);
     }
+
+    // Restore active pair and timeframe to prevent data loss on refresh
+    const savedPair = localStorage.getItem('ui_active_pair');
+    if (savedPair) setActivePair(savedPair);
+    const savedTf = localStorage.getItem('ui_timeframe');
+    if (savedTf) setTimeframe(savedTf);
+
   }, []);
 
   useEffect(() => {
     localStorage.setItem('auto_trade_config', JSON.stringify(autoTradeConfig));
   }, [autoTradeConfig]);
+
+  // Persist UI selection
+  useEffect(() => {
+    localStorage.setItem('ui_active_pair', activePair);
+  }, [activePair]);
+
+  useEffect(() => {
+    localStorage.setItem('ui_timeframe', timeframe);
+  }, [timeframe]);
 
   const handleLogin = (email: string, name: string) => {
     const user: User = { id: '1', email, name };
@@ -175,7 +191,7 @@ const App: React.FC = () => {
           const pos = await fetchOpenPositions(brokerConfig);
           setPositions(pos);
       } catch (e) {
-          logger.warn("Failed to refresh broker data", e);
+          // Silent catch for background refresh to avoid spamming errors
       }
   };
 
@@ -184,6 +200,7 @@ const App: React.FC = () => {
     // Reset AI insight when changing pair
     setAiInsight(null);
     
+    // 1. Try Broker Data First
     if (config && config.type === BrokerType.MT5 && config.accessToken && config.accountId) {
       try {
         const timeoutPromise = new Promise<Candle[]>((_, reject) => 
@@ -202,11 +219,26 @@ const App: React.FC = () => {
           return;
         }
       } catch (err: any) {
+        // Only notify if we were expecting live data
+        if (usingLiveData) {
+           notify('warning', 'Connection Issue', 'Switched to simulation mode temporarily.');
+        }
         logger.warn("Failed to fetch live data, falling back to simulation");
       }
     }
 
-    const simData = generateMarketData(pair, 300, tf);
+    // 2. Fallback to Simulation with Real-Time Reference Price
+    let overridePrice: number | undefined = undefined;
+    try {
+        const livePrice = await fetchPublicCurrentPrice(pair);
+        if (livePrice) {
+            overridePrice = livePrice;
+        }
+    } catch (e) {
+        logger.warn("Could not fetch public reference price", e);
+    }
+
+    const simData = generateMarketData(pair, 300, tf, overridePrice);
     setData(simData);
     setUsingLiveData(false);
     setLoading(false);
@@ -308,91 +340,94 @@ const App: React.FC = () => {
         if (isScanning.current) return;
         isScanning.current = true;
 
-        const now = new Date();
-        const currentHour = now.getHours();
-        
-        // Time Filter
-        if (currentHour < autoTradeConfig.tradingStartHour || currentHour >= autoTradeConfig.tradingEndHour) {
-             isScanning.current = false;
-             return;
-        }
-
-        // Iterate through ALL pairs, not just the active one
-        for (const pair of ALL_PAIRS) {
+        try {
+            const now = new Date();
+            const currentHour = now.getHours();
             
-            // 1. Fetch Snapshot Data for Pair
-            // Optimization: If using live data, we need to fetch. If sim, generate.
-            let pairData: Candle[] = [];
-            if (brokerConfig.type === BrokerType.MT5 && brokerConfig.accessToken) {
+            // Time Filter
+            if (currentHour < autoTradeConfig.tradingStartHour || currentHour >= autoTradeConfig.tradingEndHour) {
+                 isScanning.current = false;
+                 return;
+            }
+
+            // Iterate through ALL pairs, not just the active one
+            for (const pair of ALL_PAIRS) {
+                
+                // 1. Fetch Snapshot Data for Pair
+                let pairData: Candle[] = [];
                 try {
-                    // Quick fetch, smaller dataset for speed
-                    pairData = await fetchMetaApiCandles(brokerConfig, pair, timeframe, 210);
-                } catch {
-                    pairData = generateMarketData(pair, 210, timeframe); // Fallback
+                    if (brokerConfig.type === BrokerType.MT5 && brokerConfig.accessToken) {
+                        pairData = await fetchMetaApiCandles(brokerConfig, pair, timeframe, 210);
+                    } else {
+                         const livePrice = await fetchPublicCurrentPrice(pair);
+                         pairData = generateMarketData(pair, 210, timeframe, livePrice || undefined);
+                    }
+                } catch (e) {
+                    continue; // Skip pair if fetch fails
                 }
-            } else {
-                pairData = generateMarketData(pair, 210, timeframe);
+
+                if (pairData.length < 2) continue;
+
+                // 2. Analyze Pair
+                const analysis = analyzeMarket(pairData[pairData.length - 1], pairData[pairData.length - 2], pair);
+
+                // 3. Evaluate Trading Conditions
+                const nowMs = now.getTime();
+                const lastTime = lastTradeTime.current[pair] || 0;
+                const COOLDOWN_MS = 3 * 60 * 1000; // 3 Min Cooldown per pair for higher efficiency
+
+                if (nowMs - lastTime < COOLDOWN_MS) continue;
+
+                // Confidence Threshold > 75% for Auto Trade (Strict)
+                if (analysis.confidence <= 75) continue;
+                if (analysis.signal === SignalType.HOLD) continue;
+
+                // Check Existing Positions to prevent stacking risk on same pair
+                if (brokerConfig.type === BrokerType.MT5) {
+                    const hasOpenPosition = positions.some(p => p.symbol.includes(pair.replace('/', '')) || pair.includes(p.symbol));
+                    if (hasOpenPosition) continue;
+                }
+
+                // 4. Execute Trade
+                const isBuy = analysis.signal === SignalType.BUY;
+                const pipValue = pair.includes('JPY') ? 0.01 : 0.0001;
+                const price = analysis.currentPrice;
+                const slPrice = isBuy 
+                    ? price - (autoTradeConfig.stopLossPips * pipValue)
+                    : price + (autoTradeConfig.stopLossPips * pipValue);
+                const tpPrice = isBuy
+                    ? price + (autoTradeConfig.takeProfitPips * pipValue)
+                    : price - (autoTradeConfig.takeProfitPips * pipValue);
+
+                const order: TradeOrder = {
+                    symbol: pair,
+                    actionType: isBuy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+                    volume: autoTradeConfig.lotSize,
+                    stopLoss: parseFloat(slPrice.toFixed(pair.includes('JPY') ? 2 : 4)),
+                    takeProfit: parseFloat(tpPrice.toFixed(pair.includes('JPY') ? 2 : 4)),
+                    comment: `AutoBot 75%+ Conf`
+                };
+
+                logger.info(`Scanner found opportunity on ${pair}`, order);
+
+                try {
+                    await executeBrokerTrade(brokerConfig, order);
+                    notify('success', 'Auto-Trade Executed', `${order.actionType} on ${pair} (${analysis.confidence}% Conf)`);
+                    
+                    // Update cooldown
+                    lastTradeTime.current = { ...lastTradeTime.current, [pair]: nowMs };
+                    
+                    // Refresh portfolio
+                    refreshBrokerData();
+                } catch (err: any) {
+                    logger.error(`Auto-Trade Failed for ${pair}`, err);
+                }
             }
-
-            if (pairData.length < 2) continue;
-
-            // 2. Analyze Pair
-            const analysis = analyzeMarket(pairData[pairData.length - 1], pairData[pairData.length - 2], pair);
-
-            // 3. Evaluate Trading Conditions
-            const nowMs = now.getTime();
-            const lastTime = lastTradeTime.current[pair] || 0;
-            const COOLDOWN_MS = 3 * 60 * 1000; // 3 Min Cooldown per pair for higher efficiency
-
-            if (nowMs - lastTime < COOLDOWN_MS) continue;
-
-            // Confidence Threshold > 75% for Auto Trade (Strict)
-            if (analysis.confidence <= 75) continue;
-            if (analysis.signal === SignalType.HOLD) continue;
-
-            // Check Existing Positions to prevent stacking risk on same pair
-            if (brokerConfig.type === BrokerType.MT5) {
-                const hasOpenPosition = positions.some(p => p.symbol.includes(pair.replace('/', '')) || pair.includes(p.symbol));
-                if (hasOpenPosition) continue;
-            }
-
-            // 4. Execute Trade
-            const isBuy = analysis.signal === SignalType.BUY;
-            const pipValue = pair.includes('JPY') ? 0.01 : 0.0001;
-            const price = analysis.currentPrice;
-            const slPrice = isBuy 
-                ? price - (autoTradeConfig.stopLossPips * pipValue)
-                : price + (autoTradeConfig.stopLossPips * pipValue);
-            const tpPrice = isBuy
-                ? price + (autoTradeConfig.takeProfitPips * pipValue)
-                : price - (autoTradeConfig.takeProfitPips * pipValue);
-
-            const order: TradeOrder = {
-                symbol: pair,
-                actionType: isBuy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
-                volume: autoTradeConfig.lotSize,
-                stopLoss: parseFloat(slPrice.toFixed(pair.includes('JPY') ? 2 : 4)),
-                takeProfit: parseFloat(tpPrice.toFixed(pair.includes('JPY') ? 2 : 4)),
-                comment: `AutoBot 75%+ Conf`
-            };
-
-            logger.info(`Scanner found opportunity on ${pair}`, order);
-
-            try {
-                await executeBrokerTrade(brokerConfig, order);
-                notify('success', 'Auto-Trade Executed', `${order.actionType} on ${pair} (${analysis.confidence}% Conf)`);
-                
-                // Update cooldown
-                lastTradeTime.current = { ...lastTradeTime.current, [pair]: nowMs };
-                
-                // Refresh portfolio
-                refreshBrokerData();
-            } catch (err: any) {
-                logger.error(`Auto-Trade Failed for ${pair}`, err);
-            }
+        } catch (e) {
+            console.error("Critical Scanner Error", e);
+        } finally {
+            isScanning.current = false;
         }
-
-        isScanning.current = false;
     };
 
     // Run Scanner every 15 seconds
