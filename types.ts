@@ -28,6 +28,12 @@ export interface Candle {
   ma50?: number;
   ma200?: number;
   rsi?: number;
+  macd?: {
+    macdLine: number;
+    signalLine: number;
+    histogram: number;
+  };
+  atr?: number;
 }
 
 export interface MarketAnalysis {
@@ -36,6 +42,13 @@ export interface MarketAnalysis {
   ma50: number;
   ma200: number;
   rsi: number;
+  macd?: {
+    macdLine: number;
+    signalLine: number;
+    histogram: number;
+  };
+  atr?: number;
+  marketCondition: 'TRENDING' | 'RANGING' | 'VOLATILE';
   trend: Trend;
   signal: SignalType;
   confidence: number; // 0-100
@@ -61,19 +74,13 @@ export interface GeminiAnalysisResult {
   sentiment: string;
   keyLevels: string[];
   actionableAdvice: string;
-}
-
-export enum SubscriptionStatus {
-  FREE = 'FREE',
-  PENDING = 'PENDING',
-  PRO = 'PRO'
+  detectedPattern?: string; // New field for visualization
 }
 
 export interface User {
   id: string;
   email: string;
   name: string;
-  subscription: SubscriptionStatus;
 }
 
 export interface AuthState {
@@ -103,6 +110,7 @@ export interface AppSettings {
   appName: string;
   domainUrl: string;
   beginnerMode: boolean;
+  refreshInterval?: number;
 }
 
 export interface TradeOrder {
@@ -152,11 +160,4 @@ export interface MetaPosition {
   swap: number;
   commission: number;
   time: string;
-}
-
-export interface PaymentRequest {
-  senderName: string;
-  amount: number;
-  date: string;
-  reference: string;
 }

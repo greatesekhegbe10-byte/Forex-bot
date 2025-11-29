@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import {
   ResponsiveContainer,
@@ -13,6 +12,7 @@ import {
 } from 'recharts';
 import { Candle } from '../../types';
 import { BarChart3, LineChart } from 'lucide-react';
+import { getPairSettings } from '../../services/forexService';
 
 interface ForexChartProps {
   data: Candle[];
@@ -126,7 +126,7 @@ const CustomTooltip = ({ active, payload, label, digits }: any) => {
 
 export const ForexChart: React.FC<ForexChartProps> = ({ data, pair, timeframe, onTimeframeChange }) => {
   const [chartType, setChartType] = useState<'candle' | 'line'>('candle');
-  const digits = pair.includes('JPY') ? 2 : 4;
+  const { digits } = getPairSettings(pair);
   
   // Limit visible data to keep chart readable
   const chartData = data.slice(-60); 

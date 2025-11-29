@@ -1,8 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
-import { X, Server, ShieldCheck, Globe, Layout, Key, Box, AlertTriangle, CreditCard, Lock, CheckCircle, Clock } from 'lucide-react';
-import { BrokerConfig, AppSettings, BrokerType, SubscriptionStatus } from '../../types';
-import { BANK_DETAILS, initiatePaymentVerification, getStoredSubscription } from '../../services/paymentService';
+import { X, Server, Globe, Layout, Box, AlertTriangle, Clock } from 'lucide-react';
+import { BrokerConfig, AppSettings, BrokerType } from '../../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -10,8 +10,6 @@ interface SettingsModalProps {
   onSave: (config: BrokerConfig, appSettings: AppSettings) => void;
   currentConfig: BrokerConfig | null;
   currentAppSettings: AppSettings;
-  subscriptionStatus: SubscriptionStatus;
-  onSubscriptionUpdate: (status: SubscriptionStatus) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -19,11 +17,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose, 
   onSave, 
   currentConfig, 
-  currentAppSettings,
-  subscriptionStatus,
-  onSubscriptionUpdate
+  currentAppSettings
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'api' | 'pro'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'api'>('general');
 
   // Broker Config
   const [brokerType, setBrokerType] = useState<BrokerType>(BrokerType.MT5);
@@ -38,10 +34,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // App Settings
   const [appName, setAppName] = useState('');
   const [domainUrl, setDomainUrl] = useState('');
-
-  // Payment
-  const [senderName, setSenderName] = useState('');
-  const [localSubStatus, setLocalSubStatus] = useState<SubscriptionStatus>(SubscriptionStatus.FREE);
+  const [refreshInterval, setRefreshInterval] = useState<number>(10);
 
   useEffect(() => {
     if (currentConfig) {
@@ -60,9 +53,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (currentAppSettings) {
       setAppName(currentAppSettings.appName);
       setDomainUrl(currentAppSettings.domainUrl);
+      setRefreshInterval(currentAppSettings.refreshInterval || 10);
     }
-    setLocalSubStatus(subscriptionStatus);
-  }, [currentConfig, currentAppSettings, isOpen, subscriptionStatus]);
+  }, [currentConfig, currentAppSettings, isOpen]);
 
   if (!isOpen) return null;
 
@@ -111,17 +104,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       { 
         appName, 
         domainUrl,
-        beginnerMode: currentAppSettings.beginnerMode
+        beginnerMode: currentAppSettings.beginnerMode,
+        refreshInterval
       }
     );
     onClose();
-  };
-
-  const handlePaymentSubmit = () => {
-    if (!senderName.trim()) return;
-    const newStatus = initiatePaymentVerification(senderName);
-    setLocalSubStatus(newStatus);
-    onSubscriptionUpdate(newStatus);
   };
 
   return (
@@ -154,14 +141,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           >
             <Server size={14} /> Broker
           </button>
-          <button
-            onClick={() => setActiveTab('pro')}
-            className={`flex-1 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-              activeTab === 'pro' ? 'bg-slate-800 text-white border-b-2 border-yellow-500' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <CreditCard size={14} className="text-yellow-500" /> Plan
-          </button>
         </div>
 
         {/* Content */}
@@ -193,6 +172,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                   placeholder="e.g. trading.com"
                 />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-slate-400 font-semibold uppercase flex items-center gap-2">
+                  <Clock size={12} /> Data Refresh Rate (Seconds)
+                </label>
+                <input
+                  type="number"
+                  min="5"
+                  max="300"
+                  value={refreshInterval}
+                  onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                />
+                <p className="text-[10px] text-slate-500">Interval for fetching broker data (Balance, Equity, Positions).</p>
               </div>
             </div>
           )}
@@ -311,98 +305,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {activeTab === 'pro' && (
-            <div className="space-y-5">
-              <div className="text-center pb-4 border-b border-slate-800">
-                 <h3 className="text-white font-bold text-lg mb-1">Upgrade to Pro</h3>
-                 <p className="text-xs text-slate-400">Unlock Auto-Trading, AI Analysis & Backtesting</p>
-              </div>
-
-              {localSubStatus === SubscriptionStatus.FREE && (
-                <div className="space-y-4">
-                  <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Bank Transfer Details (Nigeria)</h4>
-                    <div className="space-y-2 text-sm text-white font-mono">
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Bank:</span>
-                        <span>{BANK_DETAILS.bankName}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Acct No:</span>
-                        <span className="font-bold text-yellow-400">{BANK_DETAILS.accountNumber}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Name:</span>
-                        <span>{BANK_DETAILS.accountName}</span>
-                      </div>
-                      <div className="flex justify-between pt-2 border-t border-slate-700">
-                        <span className="text-slate-500">Amount:</span>
-                        <span className="font-bold">{BANK_DETAILS.currency} {BANK_DETAILS.amountNGN.toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs text-slate-400 font-semibold uppercase">Sender Name (For Verification)</label>
-                    <input
-                      type="text"
-                      value={senderName}
-                      onChange={(e) => setSenderName(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      placeholder="Enter the name on your bank account"
-                    />
-                    <button
-                      type="button"
-                      onClick={handlePaymentSubmit}
-                      disabled={!senderName.trim()}
-                      className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg mt-2 flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle size={16} /> I Have Made Payment
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {localSubStatus === SubscriptionStatus.PENDING && (
-                <div className="bg-yellow-900/10 border border-yellow-700/50 rounded-xl p-6 text-center">
-                  <Clock size={48} className="text-yellow-500 mx-auto mb-4 animate-pulse" />
-                  <h3 className="text-white font-bold mb-2">Verification In Progress</h3>
-                  <p className="text-sm text-yellow-200/80 leading-relaxed">
-                    We are currently verifying your payment of NGN {BANK_DETAILS.amountNGN.toLocaleString()}.<br/>
-                    This usually takes 10-30 minutes. Features will unlock automatically upon confirmation.
-                  </p>
-                </div>
-              )}
-
-              {localSubStatus === SubscriptionStatus.PRO && (
-                <div className="bg-green-900/10 border border-green-700/50 rounded-xl p-6 text-center">
-                  <ShieldCheck size={48} className="text-green-500 mx-auto mb-4" />
-                  <h3 className="text-white font-bold mb-2">Pro Account Active</h3>
-                  <p className="text-sm text-green-200/80 leading-relaxed">
-                    Thank you for your payment. All features including Auto-Trading and AI Analysis are unlocked.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab !== 'pro' && (
-            <div className="flex justify-end pt-4 border-t border-slate-800 gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-6 py-2 rounded shadow-lg transition-colors"
-              >
-                Save Changes
-              </button>
-            </div>
-          )}
+          <div className="flex justify-end pt-4 border-t border-slate-800 gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-6 py-2 rounded shadow-lg transition-colors"
+            >
+              Save Changes
+            </button>
+          </div>
         </form>
       </div>
     </div>

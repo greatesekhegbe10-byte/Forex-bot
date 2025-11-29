@@ -1,8 +1,8 @@
-
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Activity, ChevronDown, Settings, LogOut, Lock, Info } from 'lucide-react';
+import { Activity, ChevronDown, Settings, LogOut, Info } from 'lucide-react';
 import { generateMarketData, analyzeMarket, fetchMetaApiCandles, executeBrokerTrade, fetchAccountInfo, fetchOpenPositions } from './services/forexService';
-import { Candle, MarketAnalysis, AuthState, BrokerConfig, User, AppSettings, AutoTradeConfig, TradeOrder, SignalType, MetaAccountInfo, MetaPosition, BrokerType, SubscriptionStatus } from './types';
+import { generateMarketInsight } from './services/geminiService';
+import { Candle, MarketAnalysis, AuthState, BrokerConfig, User, AppSettings, AutoTradeConfig, TradeOrder, SignalType, MetaAccountInfo, MetaPosition, BrokerType, GeminiAnalysisResult } from './types';
 import { ForexChart } from './components/charts/ForexChart';
 import { SignalPanel } from './components/dashboard/SignalPanel';
 import { AIAnalyst } from './components/dashboard/AIAnalyst';
@@ -12,7 +12,6 @@ import { LoginScreen } from './components/auth/LoginScreen';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ToastContainer, ToastMessage, ToastType } from './components/ui/Toast';
 import { logger } from './services/logger';
-import { getStoredSubscription, checkPaymentStatus } from './services/paymentService';
 
 // Define tabs
 enum Tab {
@@ -20,12 +19,21 @@ enum Tab {
   BACKTEST = 'backtest',
 }
 
-const AVAILABLE_PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CAD', 'AUD/USD', 'USD/CHF'];
+// Grouped pairs for better UX
+const AVAILABLE_GROUPS = {
+  "Majors": ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'USD/CAD', 'AUD/USD', 'NZD/USD'],
+  "Minors": ['EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'AUD/JPY', 'CAD/JPY', 'CHF/JPY', 'NZD/JPY', 'GBP/CHF', 'EUR/CHF', 'AUD/CHF', 'CAD/CHF', 'NZD/CHF', 'AUD/CAD', 'EUR/CAD', 'GBP/CAD', 'NZD/CAD', 'AUD/NZD', 'EUR/AUD', 'GBP/AUD', 'EUR/NZD', 'GBP/NZD'],
+  "Exotics": ['USD/SGD', 'USD/HKD', 'USD/TRY', 'USD/ZAR', 'USD/MXN', 'USD/NOK', 'USD/SEK', 'USD/DKK', 'EUR/TRY', 'EUR/NOK', 'EUR/SEK', 'USD/PLN', 'EUR/PLN', 'USD/HUF', 'EUR/HUF'],
+  "Commodities": ['XAU/USD', 'XAG/USD', 'XTI/USD', 'XBR/USD'],
+  "Crypto": ['BTC/USD', 'ETH/USD', 'LTC/USD', 'XRP/USD', 'SOL/USD', 'BNB/USD', 'ADA/USD', 'DOGE/USD']
+};
+
+// Flattened list for logic if needed, but we use groups in UI
+const ALL_PAIRS = Object.values(AVAILABLE_GROUPS).flat();
 
 const App: React.FC = () => {
   // Auth State
   const [auth, setAuth] = useState<AuthState>({ isAuthenticated: false, user: null });
-  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>(SubscriptionStatus.FREE);
   
   // App State
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
@@ -42,12 +50,17 @@ const App: React.FC = () => {
     appName: 'ForexBot', 
     domainUrl: 'forexbot.pro',
     beginnerMode: true,
+    refreshInterval: 10,
   });
   const [usingLiveData, setUsingLiveData] = useState(false);
   
   // Broker Data
   const [accountInfo, setAccountInfo] = useState<MetaAccountInfo | null>(null);
   const [positions, setPositions] = useState<MetaPosition[]>([]);
+
+  // AI Analyst State
+  const [aiInsight, setAiInsight] = useState<GeminiAnalysisResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // Auto Trading State
   const [isAutoTrading, setIsAutoTrading] = useState(false);
@@ -104,7 +117,8 @@ const App: React.FC = () => {
     try {
       const savedAppSettings = localStorage.getItem('app_settings');
       if (savedAppSettings) {
-        setAppSettings(JSON.parse(savedAppSettings));
+        const parsed = JSON.parse(savedAppSettings);
+        setAppSettings({ ...parsed, refreshInterval: parsed.refreshInterval || 10 });
       }
     } catch (e) {
       console.error("Failed to parse app settings", e);
@@ -118,31 +132,14 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Failed to parse auto trade config", e);
     }
-    
-    const status = getStoredSubscription();
-    setSubscriptionStatus(status);
   }, []);
-
-  // Poll for payment status update if Pending
-  useEffect(() => {
-    if (subscriptionStatus === SubscriptionStatus.PENDING) {
-      const interval = setInterval(async () => {
-         const newStatus = await checkPaymentStatus();
-         if (newStatus === SubscriptionStatus.PRO) {
-           setSubscriptionStatus(newStatus);
-           notify('success', 'Payment Verified', 'You are now a PRO user!');
-         }
-      }, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [subscriptionStatus]);
 
   useEffect(() => {
     localStorage.setItem('auto_trade_config', JSON.stringify(autoTradeConfig));
   }, [autoTradeConfig]);
 
   const handleLogin = (email: string, name: string) => {
-    const user: User = { id: '1', email, name, subscription: subscriptionStatus };
+    const user: User = { id: '1', email, name };
     localStorage.setItem('forex_user', JSON.stringify(user));
     setAuth({ isAuthenticated: true, user });
     notify('success', 'Welcome!', `Great to see you, ${name}.`);
@@ -151,6 +148,8 @@ const App: React.FC = () => {
   const handleLogout = () => {
     localStorage.removeItem('forex_user');
     setAuth({ isAuthenticated: false, user: null });
+    setAccountInfo(null);
+    setPositions([]);
     notify('info', 'Logged Out', 'See you next time!');
   };
 
@@ -182,6 +181,8 @@ const App: React.FC = () => {
 
   const loadData = async (pair: string, tf: string, config: BrokerConfig | null) => {
     setLoading(true);
+    // Reset AI insight when changing pair
+    setAiInsight(null);
     
     if (config && config.type === BrokerType.MT5 && config.accessToken && config.accountId) {
       try {
@@ -220,9 +221,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
       if (!usingLiveData || !brokerConfig) return;
-      const interval = setInterval(refreshBrokerData, 10000); 
+      // Use configured interval or default to 10s
+      const intervalMs = (appSettings.refreshInterval || 10) * 1000;
+      const interval = setInterval(refreshBrokerData, intervalMs); 
       return () => clearInterval(interval);
-  }, [usingLiveData, brokerConfig]);
+  }, [usingLiveData, brokerConfig, appSettings.refreshInterval]);
 
   // Live Chart Simulation (if not using broker data)
   useEffect(() => {
@@ -281,14 +284,23 @@ const App: React.FC = () => {
     return analyzeMarket(current, prev, activePair);
   }, [data, activePair]);
 
+  // AI Analysis Trigger
+  const performAnalysis = async () => {
+    if (!currentAnalysis) return;
+    setIsAnalyzing(true);
+    try {
+      const result = await generateMarketInsight(currentAnalysis);
+      setAiInsight(result);
+      notify('success', 'Analysis Updated', 'Fresh market insights received.');
+    } catch (e: any) {
+      notify('error', 'Analysis Failed', e.message || 'Could not generate report.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   // --- MULTI-PAIR MARKET SCANNER & AUTO TRADER ---
   useEffect(() => {
-    // Access Control
-    if (subscriptionStatus !== SubscriptionStatus.PRO) {
-        if (isAutoTrading) setIsAutoTrading(false);
-        return;
-    }
-
     if (!isAutoTrading || !brokerConfig) return;
 
     // Background Scanner Logic
@@ -306,7 +318,7 @@ const App: React.FC = () => {
         }
 
         // Iterate through ALL pairs, not just the active one
-        for (const pair of AVAILABLE_PAIRS) {
+        for (const pair of ALL_PAIRS) {
             
             // 1. Fetch Snapshot Data for Pair
             // Optimization: If using live data, we need to fetch. If sim, generate.
@@ -334,8 +346,8 @@ const App: React.FC = () => {
 
             if (nowMs - lastTime < COOLDOWN_MS) continue;
 
-            // Confidence Threshold > 70%
-            if (analysis.confidence <= 70) continue;
+            // Confidence Threshold > 75% for Auto Trade (Strict)
+            if (analysis.confidence <= 75) continue;
             if (analysis.signal === SignalType.HOLD) continue;
 
             // Check Existing Positions to prevent stacking risk on same pair
@@ -361,7 +373,7 @@ const App: React.FC = () => {
                 volume: autoTradeConfig.lotSize,
                 stopLoss: parseFloat(slPrice.toFixed(pair.includes('JPY') ? 2 : 4)),
                 takeProfit: parseFloat(tpPrice.toFixed(pair.includes('JPY') ? 2 : 4)),
-                comment: `AutoBot 70%+ Conf`
+                comment: `AutoBot 75%+ Conf`
             };
 
             logger.info(`Scanner found opportunity on ${pair}`, order);
@@ -391,12 +403,7 @@ const App: React.FC = () => {
 
     return () => clearInterval(scannerInterval);
 
-  }, [isAutoTrading, brokerConfig, autoTradeConfig, positions, subscriptionStatus, timeframe]);
-
-  const handleRestrictedAccess = (feature: string) => {
-      notify('warning', `${feature} Locked`, 'Please upgrade to PRO to access this feature.');
-      setShowSettings(true);
-  };
+  }, [isAutoTrading, brokerConfig, autoTradeConfig, positions, timeframe]);
 
   if (!auth.isAuthenticated) {
     return <LoginScreen onLogin={handleLogin} />;
@@ -413,8 +420,6 @@ const App: React.FC = () => {
         onSave={handleSaveSettings}
         currentConfig={brokerConfig}
         currentAppSettings={appSettings}
-        subscriptionStatus={subscriptionStatus}
-        onSubscriptionUpdate={setSubscriptionStatus}
       />
 
       {/* Header */}
@@ -430,16 +435,11 @@ const App: React.FC = () => {
                   {appSettings.appName}
                 </h1>
                 <div className="flex items-center gap-2 mt-0.5">
-                    {appSettings.beginnerMode && (
-                    <span className="text-[10px] text-[#a1a1aa] font-medium">Simple View</span>
+                    {appSettings.beginnerMode ? (
+                      <span className="text-[10px] text-[#a1a1aa] font-medium">Simple View</span>
+                    ) : (
+                      <span className="text-[10px] text-blue-400 font-medium">Advanced View</span>
                     )}
-                    <span className={`text-[10px] font-bold px-1.5 rounded ${
-                        subscriptionStatus === SubscriptionStatus.PRO ? 'bg-green-900 text-green-400' : 
-                        subscriptionStatus === SubscriptionStatus.PENDING ? 'bg-yellow-900 text-yellow-400' :
-                        'bg-slate-800 text-slate-400'
-                    }`}>
-                        {subscriptionStatus}
-                    </span>
                 </div>
               </div>
             </div>
@@ -449,9 +449,13 @@ const App: React.FC = () => {
                 <select 
                   value={activePair}
                   onChange={(e) => setActivePair(e.target.value)}
-                  className="appearance-none bg-[#18181b] border border-[#27272a] text-white text-sm rounded-md py-1.5 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-600/50 transition-all"
+                  className="appearance-none bg-[#18181b] border border-[#27272a] text-white text-sm rounded-md py-1.5 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-600/50 transition-all max-w-[150px]"
                 >
-                  {AVAILABLE_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
+                  {Object.entries(AVAILABLE_GROUPS).map(([group, pairs]) => (
+                    <optgroup key={group} label={group}>
+                      {pairs.map(p => <option key={p} value={p}>{p}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 text-[#71717a] pointer-events-none" size={14} />
               </div>
@@ -471,7 +475,7 @@ const App: React.FC = () => {
                     : 'text-[#71717a] hover:text-white'
                   }`}
                 >
-                  {appSettings.beginnerMode ? 'Beginner' : 'Pro'}
+                  {appSettings.beginnerMode ? 'Beginner' : 'Advanced'}
                 </button>
 
                 <button
@@ -506,13 +510,7 @@ const App: React.FC = () => {
               Market Dashboard
             </button>
             <button 
-              onClick={() => {
-                  if (subscriptionStatus === SubscriptionStatus.PRO) {
-                      setActiveTab(Tab.BACKTEST);
-                  } else {
-                      handleRestrictedAccess('Strategy Backtester');
-                  }
-              }}
+              onClick={() => setActiveTab(Tab.BACKTEST)}
               className={`pb-3 text-sm font-medium transition-all border-b-2 flex items-center gap-1 ${
                 activeTab === Tab.BACKTEST 
                   ? 'border-blue-600 text-white' 
@@ -520,7 +518,6 @@ const App: React.FC = () => {
               }`}
             >
               Strategy Tester
-              {subscriptionStatus !== SubscriptionStatus.PRO && <Lock size={12} className="text-yellow-500" />}
             </button>
         </div>
       </div>
@@ -534,7 +531,11 @@ const App: React.FC = () => {
             onChange={(e) => setActivePair(e.target.value)}
             className="w-full bg-[#18181b] border border-[#27272a] text-white text-sm rounded-lg py-3 px-4 focus:outline-none focus:border-blue-600"
           >
-            {AVAILABLE_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
+             {Object.entries(AVAILABLE_GROUPS).map(([group, pairs]) => (
+                <optgroup key={group} label={group}>
+                  {pairs.map(p => <option key={p} value={p}>{p}</option>)}
+                </optgroup>
+              ))}
           </select>
         </div>
 
@@ -582,21 +583,11 @@ const App: React.FC = () => {
                      <div className="relative">
                         <AIAnalyst 
                             analysis={currentAnalysis} 
+                            insight={aiInsight}
+                            loading={isAnalyzing}
+                            onAnalyze={performAnalysis}
                             notify={notify} 
                         />
-                        {subscriptionStatus !== SubscriptionStatus.PRO && (
-                            <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex flex-col items-center justify-center rounded-xl z-10 border border-[#27272a]">
-                                <Lock className="text-yellow-500 mb-2" size={32} />
-                                <h3 className="text-white font-bold mb-1">AI Analyst Locked</h3>
-                                <p className="text-slate-300 text-xs mb-3">Upgrade to PRO to get AI-powered insights</p>
-                                <button 
-                                    onClick={() => setShowSettings(true)}
-                                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold"
-                                >
-                                    Unlock Pro Features
-                                </button>
-                            </div>
-                        )}
                      </div>
                    </div>
 
@@ -605,13 +596,7 @@ const App: React.FC = () => {
                         activePair={activePair} 
                         currentPrice={currentAnalysis.currentPrice}
                         brokerConfig={brokerConfig}
-                        onAutoTradeToggle={(enabled) => {
-                            if (subscriptionStatus === SubscriptionStatus.PRO) {
-                                setIsAutoTrading(enabled);
-                            } else {
-                                handleRestrictedAccess('Auto-Trading');
-                            }
-                        }}
+                        onAutoTradeToggle={(enabled) => setIsAutoTrading(enabled)}
                         isAutoTrading={isAutoTrading}
                         notify={notify}
                         autoTradeConfig={autoTradeConfig}
@@ -620,7 +605,6 @@ const App: React.FC = () => {
                         accountInfo={accountInfo}
                         positions={positions}
                         onRefreshBrokerData={refreshBrokerData}
-                        isPro={subscriptionStatus === SubscriptionStatus.PRO}
                      />
 
                      {appSettings.beginnerMode && (
@@ -646,7 +630,7 @@ const App: React.FC = () => {
                </div>
              )}
 
-             {activeTab === Tab.BACKTEST && subscriptionStatus === SubscriptionStatus.PRO && (
+             {activeTab === Tab.BACKTEST && (
                <div className="bg-[#18181b] border border-[#27272a] rounded-xl p-6">
                  <div className="mb-6 border-b border-[#27272a] pb-4">
                    <h2 className="text-lg font-bold text-white mb-1">Strategy Backtest</h2>

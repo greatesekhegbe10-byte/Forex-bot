@@ -1,15 +1,90 @@
-
 import { Candle, SignalType, StrategyType, BacktestResult, Trend, MarketAnalysis, BrokerConfig, BrokerType, TradeOrder, ParsedSignal, MetaAccountInfo, MetaPosition } from '../types';
 import { logger } from './logger';
 
 // --- Constants ---
 const PAIR_CONFIGS: Record<string, { initialPrice: number, volatility: number }> = {
+  // Majors
   'EUR/USD': { initialPrice: 1.1000, volatility: 0.0015 },
   'GBP/USD': { initialPrice: 1.2700, volatility: 0.0020 },
   'USD/JPY': { initialPrice: 148.50, volatility: 0.1500 },
   'USD/CHF': { initialPrice: 0.8850, volatility: 0.0012 },
   'AUD/USD': { initialPrice: 0.6550, volatility: 0.0010 },
   'USD/CAD': { initialPrice: 1.3500, volatility: 0.0018 },
+  'NZD/USD': { initialPrice: 0.6100, volatility: 0.0011 },
+
+  // Minors
+  'EUR/GBP': { initialPrice: 0.8550, volatility: 0.0010 },
+  'EUR/JPY': { initialPrice: 163.50, volatility: 0.1600 },
+  'GBP/JPY': { initialPrice: 189.00, volatility: 0.2000 },
+  'AUD/JPY': { initialPrice: 97.50, volatility: 0.1200 },
+  'CAD/JPY': { initialPrice: 110.00, volatility: 0.1300 },
+  'CHF/JPY': { initialPrice: 168.00, volatility: 0.1400 },
+  'NZD/JPY': { initialPrice: 90.50, volatility: 0.1100 },
+  'GBP/CHF': { initialPrice: 1.1200, volatility: 0.0015 },
+  'EUR/CHF': { initialPrice: 0.9500, volatility: 0.0010 },
+  'AUD/CAD': { initialPrice: 0.8900, volatility: 0.0012 },
+  'EUR/CAD': { initialPrice: 1.4800, volatility: 0.0016 },
+  'GBP/CAD': { initialPrice: 1.7100, volatility: 0.0022 },
+  'AUD/NZD': { initialPrice: 1.0750, volatility: 0.0010 },
+  'EUR/AUD': { initialPrice: 1.6500, volatility: 0.0018 },
+  'GBP/AUD': { initialPrice: 1.9300, volatility: 0.0025 },
+  'EUR/NZD': { initialPrice: 1.7700, volatility: 0.0020 },
+  'GBP/NZD': { initialPrice: 2.0800, volatility: 0.0028 },
+  'AUD/CHF': { initialPrice: 0.5800, volatility: 0.0009 },
+  'CAD/CHF': { initialPrice: 0.6500, volatility: 0.0010 },
+  'NZD/CHF': { initialPrice: 0.5400, volatility: 0.0009 },
+  'NZD/CAD': { initialPrice: 0.8300, volatility: 0.0011 },
+
+  // Exotics
+  'USD/SGD': { initialPrice: 1.3400, volatility: 0.0010 },
+  'USD/HKD': { initialPrice: 7.8200, volatility: 0.0005 },
+  'USD/TRY': { initialPrice: 32.50, volatility: 0.2500 },
+  'USD/ZAR': { initialPrice: 18.80, volatility: 0.1500 },
+  'USD/MXN': { initialPrice: 16.70, volatility: 0.0800 },
+  'USD/NOK': { initialPrice: 10.60, volatility: 0.0500 },
+  'USD/SEK': { initialPrice: 10.35, volatility: 0.0500 },
+  'USD/DKK': { initialPrice: 6.8500, volatility: 0.0030 },
+  'EUR/TRY': { initialPrice: 35.20, volatility: 0.3000 },
+  'EUR/NOK': { initialPrice: 11.45, volatility: 0.0600 },
+  'EUR/SEK': { initialPrice: 11.25, volatility: 0.0600 },
+  'USD/PLN': { initialPrice: 3.9500, volatility: 0.0200 },
+  'EUR/PLN': { initialPrice: 4.3000, volatility: 0.0150 },
+  'USD/HUF': { initialPrice: 360.00, volatility: 1.5000 },
+  'EUR/HUF': { initialPrice: 390.00, volatility: 1.2000 },
+  
+  // Metals/Commodities
+  'XAU/USD': { initialPrice: 2350.00, volatility: 15.00 }, // Gold
+  'XAG/USD': { initialPrice: 28.50, volatility: 0.25 },   // Silver
+  'XTI/USD': { initialPrice: 82.00, volatility: 0.80 },   // Oil
+  'XBR/USD': { initialPrice: 86.00, volatility: 0.80 },   // Brent Oil
+
+  // Crypto
+  'BTC/USD': { initialPrice: 65000.00, volatility: 800.00 },
+  'ETH/USD': { initialPrice: 3500.00, volatility: 50.00 },
+  'LTC/USD': { initialPrice: 85.00, volatility: 1.50 },
+  'XRP/USD': { initialPrice: 0.6000, volatility: 0.0100 },
+  'SOL/USD': { initialPrice: 145.00, volatility: 3.00 },
+  'BNB/USD': { initialPrice: 600.00, volatility: 8.00 },
+  'ADA/USD': { initialPrice: 0.4500, volatility: 0.0080 },
+  'DOGE/USD': { initialPrice: 0.1600, volatility: 0.0050 },
+};
+
+// Helper to determine decimals and pip value based on pair type
+export const getPairSettings = (pair: string) => {
+  if (pair.includes('JPY') || pair.includes('XAU') || pair.includes('XAG') || pair.includes('XTI') || pair.includes('XBR')) {
+    return { digits: 2, pipValue: 0.01 };
+  }
+  if (pair.includes('BTC') || pair.includes('ETH') || pair.includes('SOL') || pair.includes('BNB') || pair.includes('LTC')) {
+    return { digits: 2, pipValue: 0.01 };
+  }
+  if (pair.includes('XRP') || pair.includes('DOGE') || pair.includes('ADA')) {
+    return { digits: 4, pipValue: 0.0001 };
+  }
+  if (pair.includes('HUF')) {
+    return { digits: 2, pipValue: 0.01 };
+  }
+  // Standard Forex
+  return { digits: 4, pipValue: 0.0001 };
 };
 
 // --- Helper Math Functions ---
@@ -52,6 +127,56 @@ export const calculateRSI = (closes: number[], period: number = 14): number | un
   return 100 - (100 / (1 + rs));
 };
 
+export const calculateEMA = (data: number[], period: number): number[] => {
+  if (data.length === 0) return [];
+  const k = 2 / (period + 1);
+  const emaArray = [data[0]]; // Start with first price as approximate EMA
+  for (let i = 1; i < data.length; i++) {
+    const ema = data[i] * k + emaArray[i - 1] * (1 - k);
+    emaArray.push(ema);
+  }
+  return emaArray;
+};
+
+export const calculateMACD = (closes: number[]) => {
+  const ema12 = calculateEMA(closes, 12);
+  const ema26 = calculateEMA(closes, 26);
+  
+  const macdLine = closes.map((_, i) => (ema12[i] !== undefined && ema26[i] !== undefined) ? ema12[i] - ema26[i] : 0);
+  const signalLine = calculateEMA(macdLine, 9);
+  const histogram = macdLine.map((m, i) => m - (signalLine[i] || 0));
+
+  return { macdLine, signalLine, histogram };
+};
+
+export const calculateATR = (highs: number[], lows: number[], closes: number[], period: number = 14): number[] => {
+  if (highs.length < 2) return new Array(highs.length).fill(0);
+
+  const trs = [highs[0] - lows[0]]; // First TR
+  for (let i = 1; i < highs.length; i++) {
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    );
+    trs.push(tr);
+  }
+
+  // Calculate ATR using SMA of TRs for simplicity/stability
+  const atrs: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < trs.length; i++) {
+    sum += trs[i];
+    if (i < period) {
+      atrs.push(sum / (i + 1));
+    } else {
+      sum -= trs[i - period];
+      atrs.push(sum / period);
+    }
+  }
+  return atrs;
+};
+
 // --- Data Generation (Fallback) ---
 
 export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300, timeframe: string = '1h'): Candle[] => {
@@ -78,6 +203,9 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
   const now = new Date();
 
   const prices: number[] = [];
+  const highs: number[] = [];
+  const lows: number[] = [];
+  const closes: number[] = [];
   
   // Generate base price line first
   for (let i = 0; i < count + 200; i++) {
@@ -87,7 +215,8 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
     prices.push(currentPrice);
   }
 
-  // Generate OHLC from base line
+  // Pre-calculate OHLC arrays for indicators
+  const rawCandles: any[] = [];
   for (let i = 200; i < prices.length; i++) {
     const close = prices[i];
     const prevClose = prices[i-1];
@@ -98,21 +227,36 @@ export const generateMarketData = (pair: string = 'EUR/USD', count: number = 300
     const bodyMin = Math.min(open, close);
     const high = bodyMax + Math.random() * (adjustedVolatility * 0.4);
     const low = bodyMin - Math.random() * (adjustedVolatility * 0.4);
-    
     const time = new Date(now.getTime() - (prices.length - 1 - i) * intervalMs).toISOString();
-    
-    const historySlice = prices.slice(0, i + 1);
+
+    rawCandles.push({ time, open, high, low, close });
+    highs.push(high);
+    lows.push(low);
+    closes.push(close);
+  }
+
+  // Calculate Bulk Indicators
+  const macdData = calculateMACD(closes);
+  const atrData = calculateATR(highs, lows, closes, 14);
+
+  // Construct Final Candles
+  for (let i = 0; i < rawCandles.length; i++) {
+    const c = rawCandles[i];
+    // Need full history for simple MAs/RSI as implemented
+    const historySlice = prices.slice(0, i + 201); // approximate mapping back to full price array
 
     data.push({
-      time,
-      open,
-      high,
-      low,
-      close,
+      ...c,
       volume: Math.floor(Math.random() * 1000 + 500),
       ma50: calculateSMA(historySlice, 50),
       ma200: calculateSMA(historySlice, 200),
-      rsi: calculateRSI(historySlice, 14)
+      rsi: calculateRSI(historySlice, 14),
+      macd: {
+        macdLine: macdData.macdLine[i],
+        signalLine: macdData.signalLine[i],
+        histogram: macdData.histogram[i]
+      },
+      atr: atrData[i]
     });
   }
 
@@ -168,18 +312,33 @@ export const fetchMetaApiCandles = async (
     }
 
     const prices: number[] = [];
+    const highs: number[] = [];
+    const lows: number[] = [];
+    const closes: number[] = [];
+
     const candles: any[] = rawCandles.map((c: any) => {
       const close = c.close || c.c;
+      const high = c.high || c.h;
+      const low = c.low || c.l;
+      
       prices.push(close);
+      highs.push(high);
+      lows.push(low);
+      closes.push(close);
+
       return {
         time: c.time || c.t,
         open: c.open || c.o,
-        high: c.high || c.h,
-        low: c.low || c.l,
+        high: high,
+        low: low,
         close: close,
         volume: c.tickVolume || c.v || 0
       };
     });
+
+    // Calculate Indicators
+    const macdData = calculateMACD(closes);
+    const atrData = calculateATR(highs, lows, closes, 14);
 
     const finalData: Candle[] = candles.map((c, index) => {
       const historySlice = prices.slice(0, index + 1);
@@ -187,7 +346,13 @@ export const fetchMetaApiCandles = async (
         ...c,
         ma50: calculateSMA(historySlice, 50),
         ma200: calculateSMA(historySlice, 200),
-        rsi: calculateRSI(historySlice, 14)
+        rsi: calculateRSI(historySlice, 14),
+        macd: {
+            macdLine: macdData.macdLine[index],
+            signalLine: macdData.signalLine[index],
+            histogram: macdData.histogram[index]
+        },
+        atr: atrData[index]
       };
     });
 
@@ -402,43 +567,119 @@ export const parseSignalText = (text: string): ParsedSignal => {
   }
 };
 
-// --- Analysis Logic ---
+// --- Analysis Logic (ADAPTIVE) ---
+
 export const analyzeMarket = (candle: Candle, prevCandle: Candle, pair: string): MarketAnalysis => {
   const ma50 = candle.ma50 || 0;
   const ma200 = candle.ma200 || 0;
   const rsi = candle.rsi || 50;
-  const prevMa50 = prevCandle.ma50 || 0;
-  const prevMa200 = prevCandle.ma200 || 0;
+  const macd = candle.macd || { macdLine: 0, signalLine: 0, histogram: 0 };
+  const atr = candle.atr || 0;
+  const currentPrice = candle.close;
 
-  if (isNaN(ma50) || isNaN(ma200) || isNaN(rsi)) {
+  if (ma50 === 0 || ma200 === 0) {
       return {
           pair, currentPrice: candle.close, ma50: 0, ma200: 0, rsi: 50, 
-          trend: Trend.NEUTRAL, signal: SignalType.HOLD, confidence: 0
+          trend: Trend.NEUTRAL, signal: SignalType.HOLD, confidence: 0,
+          marketCondition: 'RANGING', atr: 0
       };
   }
 
-  let signal = SignalType.HOLD;
+  // 1. Determine Market Condition (Adaptive)
+  const spread = Math.abs(ma50 - ma200);
+  const spreadPercent = spread / currentPrice;
+  // If spread > 0.05% considered trending, otherwise ranging/consolidation
+  const isTrending = spreadPercent > 0.0005;
+  
+  // Volatility Check using ATR
+  const volatilityPercent = atr / currentPrice;
+  const isVolatile = volatilityPercent > 0.0025; // 0.25% movement per candle avg = High Volatility
+
+  let marketCondition: 'TRENDING' | 'RANGING' | 'VOLATILE' = 'RANGING';
+  if (isVolatile) marketCondition = 'VOLATILE';
+  else if (isTrending) marketCondition = 'TRENDING';
+
+  // 2. Determine Trend Direction
   let trend = Trend.NEUTRAL;
-  let confidence = 50;
+  if (ma50 > ma200 && spreadPercent > 0.0002) trend = Trend.BULLISH;
+  else if (ma50 < ma200 && spreadPercent > 0.0002) trend = Trend.BEARISH;
 
-  if (ma50 > ma200) trend = Trend.BULLISH;
-  else if (ma50 < ma200) trend = Trend.BEARISH;
+  // 3. Signal Logic (Adaptive Sure Signals)
+  let signal = SignalType.HOLD;
+  let confidence = 50; // Base confidence
 
-  const goldenCross = prevMa50 < prevMa200 && ma50 > ma200;
-  const deathCross = prevMa50 > prevMa200 && ma50 < ma200;
+  // Indicators
+  const isOversold = rsi < 30;
+  const isOverbought = rsi > 70;
+  const macdBullish = macd.histogram > 0 && macd.macdLine > macd.signalLine;
+  const macdBearish = macd.histogram < 0 && macd.macdLine < macd.signalLine;
+  const strongMomentum = Math.abs(macd.histogram) > 0.0001; // Filter noise
 
-  const rsiOversold = rsi < 30;
-  const rsiOverbought = rsi > 70;
-
-  if (goldenCross || (trend === Trend.BULLISH && rsiOversold)) {
-    signal = SignalType.BUY;
-    confidence = goldenCross ? 85 : 70;
-  } else if (deathCross || (trend === Trend.BEARISH && rsiOverbought)) {
-    signal = SignalType.SELL;
-    confidence = deathCross ? 85 : 70;
+  // ADAPTIVE STRATEGY SELECTION
+  if (marketCondition === 'TRENDING') {
+      // Trend Following
+      if (trend === Trend.BULLISH) {
+          // Buy on minor dips or strong continuation
+          if ((rsi < 60 && macdBullish) || (currentPrice > ma50 && macdBullish && strongMomentum)) {
+              signal = SignalType.BUY;
+              confidence += 25; // Strong Trend Alignment
+              if (macdBullish && strongMomentum) confidence += 10;
+              if (rsi < 45) confidence += 10; // Value buy
+              if (currentPrice > ma50) confidence += 5;
+          }
+      } else if (trend === Trend.BEARISH) {
+          // Sell on minor rallies or strong continuation
+          if ((rsi > 40 && macdBearish) || (currentPrice < ma50 && macdBearish && strongMomentum)) {
+              signal = SignalType.SELL;
+              confidence += 25; 
+              if (macdBearish && strongMomentum) confidence += 10;
+              if (rsi > 55) confidence += 10; // Value sell
+              if (currentPrice < ma50) confidence += 5;
+          }
+      }
+  } else if (marketCondition === 'RANGING') {
+      // Mean Reversion (Buy Low, Sell High)
+      if (isOversold && macdBullish) {
+          signal = SignalType.BUY;
+          confidence += 20; 
+          confidence += (30 - rsi); // Higher confidence deeper into oversold
+      } else if (isOverbought && macdBearish) {
+          signal = SignalType.SELL;
+          confidence += 20;
+          confidence += (rsi - 70); // Higher confidence deeper into overbought
+      }
+  } else if (marketCondition === 'VOLATILE') {
+      // Safety Mode: Only trade extreme setups
+      confidence -= 20; // Penalize volatility
+      if (isOversold && rsi < 25 && macdBullish) {
+          signal = SignalType.BUY;
+          confidence += 30; // Catching a knife requires strong signal
+      }
+      if (isOverbought && rsi > 75 && macdBearish) {
+          signal = SignalType.SELL;
+          confidence += 30;
+      }
   }
 
-  return { pair: pair, currentPrice: candle.close, ma50, ma200, rsi, trend, signal, confidence };
+  // Final "Sure Signal" Check
+  // Require at least 75% confidence for a actionable signal, otherwise hold
+  if (confidence < 75) {
+      signal = SignalType.HOLD; 
+  }
+
+  return { 
+      pair, 
+      currentPrice: candle.close, 
+      ma50, 
+      ma200, 
+      rsi, 
+      trend, 
+      signal, 
+      confidence: Math.min(Math.round(confidence), 99),
+      marketCondition,
+      macd,
+      atr
+  };
 };
 
 export const runBacktest = (data: Candle[], strategy: StrategyType): BacktestResult => {

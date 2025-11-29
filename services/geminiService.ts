@@ -14,10 +14,20 @@ const generateSimulatedInsight = (analysis: MarketAnalysis): GeminiAnalysisResul
   let sentiment = 'Neutral';
   let summary = '';
   let advice = '';
+  let pattern = 'Consolidation';
 
-  // 1. Determine Sentiment
-  if (trend === Trend.BULLISH && signal === SignalType.BUY) sentiment = 'Bullish';
-  else if (trend === Trend.BEARISH && signal === SignalType.SELL) sentiment = 'Bearish';
+  // 1. Determine Sentiment & Pattern
+  if (trend === Trend.BULLISH && signal === SignalType.BUY) {
+    sentiment = 'Bullish';
+    pattern = 'Golden Cross';
+  } else if (trend === Trend.BEARISH && signal === SignalType.SELL) {
+    sentiment = 'Bearish';
+    pattern = 'Death Cross';
+  } else if (rsi > 70) {
+    pattern = 'Overbought/Doji';
+  } else if (rsi < 30) {
+    pattern = 'Oversold/Hammer';
+  }
 
   // 2. Generate Summary
   const rsiState = rsi > 70 ? "overbought conditions" : rsi < 30 ? "oversold conditions" : "neutral momentum";
@@ -49,7 +59,8 @@ const generateSimulatedInsight = (analysis: MarketAnalysis): GeminiAnalysisResul
     summary,
     sentiment,
     keyLevels: [`Res: ${r1}`, `Pv: ${pivot}`, `Sup: ${s1}`],
-    actionableAdvice: advice
+    actionableAdvice: advice,
+    detectedPattern: pattern
   };
 };
 
@@ -88,6 +99,7 @@ export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<G
     Based strictly on this data, provide a JSON response with your analysis.
     The 'summary' should explain WHY the trend is what it is.
     The 'sentiment' must be exactly one of: 'Bullish', 'Bearish', 'Neutral'.
+    The 'detectedPattern' should be the closest technical candlestick pattern or chart formation (e.g., 'Bullish Engulfing', 'Hammer', 'Shooting Star', 'Doji', 'Double Top', 'Head and Shoulders'). If no specific pattern is clear, state 'Generic Trend' or 'Consolidation'.
     'keyLevels' should be 3 estimated support/resistance prices near current price.
     'actionableAdvice' should be a specific trading recommendation.
   `;
@@ -111,9 +123,10 @@ export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<G
               type: Type.ARRAY,
               items: { type: Type.STRING }
             },
-            actionableAdvice: { type: Type.STRING }
+            actionableAdvice: { type: Type.STRING },
+            detectedPattern: { type: Type.STRING }
           },
-          required: ["summary", "sentiment", "keyLevels", "actionableAdvice"]
+          required: ["summary", "sentiment", "keyLevels", "actionableAdvice", "detectedPattern"]
         }
       }
     });
@@ -124,7 +137,7 @@ export const generateMarketInsight = async (analysis: MarketAnalysis): Promise<G
     if (!text) throw new Error("Empty response from AI model");
     
     const result = JSON.parse(text) as GeminiAnalysisResult;
-    logger.info("AI Analysis received successfully", { sentiment: result.sentiment });
+    logger.info("AI Analysis received successfully", { sentiment: result.sentiment, pattern: result.detectedPattern });
     
     return result;
 
